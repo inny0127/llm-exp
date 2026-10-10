@@ -46,7 +46,9 @@ class Probe:
             b = sel[i:i + batch]
             L = int(self.lens[b].max())
             logits = model(self.x[b, :L])
-            last = logits[torch.arange(len(b)), self.lens[b] - 1]
+            # Only the last prompt position matters; select it before leaving the device.
+            pos = (self.lens[b] - 1).to(logits.device)
+            last = logits[torch.arange(len(b), device=logits.device), pos].float().cpu()
             cl = last.gather(1, self.cand[b]).masked_fill(~self.cand_mask[b], -1e9)
             lp = F.log_softmax(cl, dim=-1)
             ans = self.ans[b]
@@ -68,8 +70,8 @@ def val_windows(path, n, ctx, seed=0):
 def lm_eval(model, x, y, batch=64):
     tot = 0.0
     for i in range(0, len(x), batch):
-        logits = model(x[i:i + batch])
-        tot += F.cross_entropy(logits.reshape(-1, logits.size(-1)), y[i:i + batch].reshape(-1),
+        logits = model(x[i:i + batch]).float()
+        tot += F.cross_entropy(logits.reshape(-1, logits.size(-1)), y[i:i + batch].reshape(-1).to(logits.device),
                                reduction="sum").item()
     return tot / y.numel()
 

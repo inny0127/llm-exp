@@ -1,6 +1,9 @@
 """Pretrain the memory-layer GPT on TinyStories + old-entity bios (one shuffled epoch).
 
-Usage: python pretrain.py --data_dir data --out runs/pretrain
+Resumable: a checkpoint with the optimizer state is written every --eval_every steps and
+picked up again on restart (Colab sessions disconnect).
+
+Usage: python pretrain.py --data_dir data --out runs/pretrain [--size small --device cuda --amp]
 """
 import argparse
 import dataclasses
@@ -14,26 +17,32 @@ import torch
 from tokenizers import Tokenizer
 
 import evals
-from model import GPT, GPTConfig, lm_loss
+from model import GPT, GPTConfig, PRESETS, lm_loss
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--data_dir", default="data")
     ap.add_argument("--out", default="runs/pretrain")
+    ap.add_argument("--size", choices=list(PRESETS), default="tiny")
     ap.add_argument("--batch", type=int, default=32)
     ap.add_argument("--lr", type=float, default=1.5e-3)
     ap.add_argument("--warmup", type=int, default=200)
     ap.add_argument("--threads", type=int, default=4)
+    ap.add_argument("--device", default="cpu")
+    ap.add_argument("--amp", action="store_true", help="bf16 autocast (CUDA)")
     ap.add_argument("--eval_every", type=int, default=500)
     ap.add_argument("--max_steps", type=int, default=0, help="0 = one full epoch")
     args = ap.parse_args()
     torch.set_num_threads(args.threads)
     torch.manual_seed(0)
     os.makedirs(args.out, exist_ok=True)
+    if args.device.startswith("cuda"):
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
 
-    cfg = GPTConfig()
-    model = GPT(cfg)
+    cfg = GPTConfig(**PRESETS[args.size])
+    model = GPT(cfg).to(args.device)
     tok = Tokenizer.from_file(os.path.join(args.data_dir, "tokenizer.json"))
     with open(os.path.join(args.data_dir, "facts.json")) as f:
         old = json.load(f)["old"]
@@ -54,7 +63,8 @@ def main():
     mem = [p for n, p in model.named_parameters() if n in mem_names]
     opt = torch.optim.AdamW([{"params": decay, "weight_decay": 0.1},
                              {"params": no_decay + mem, "weight_decay": 0.0}],
-                            lr=args.lr, betas=(0.9, 0.95))
+                            lr=args.lr, betas=(0.9, 0.95),
+                            fused=args.device.startswith("cuda"))
 
     def lr_at(s):
         if s < args.warmup:
@@ -62,14 +72,35 @@ def main():
         p = (s - args.warmup) / max(1, steps - args.warmup)
         return args.lr * (0.1 + 0.9 * 0.5 * (1 + math.cos(math.pi * p)))
 
-    log = open(os.path.join(args.out, "log.jsonl"), "w")
+    start = 0
+    resume = os.path.join(args.out, "resume.pt")
+    if os.path.exists(resume):
+        ck = torch.load(resume, map_location=args.device)
+        model.load_state_dict(ck["model"])
+        opt.load_state_dict(ck["opt"])
+        start = ck["step"]
+        print(f"resumed at step {start}/{steps}", flush=True)
+    if start >= steps:
+        print("already done", flush=True)
+        return
+
+    def save(step):
+        torch.save({"cfg": dataclasses.asdict(cfg), "model": model.state_dict()},
+                   os.path.join(args.out, "model.pt"))
+        torch.save({"model": model.state_dict(), "opt": opt.state_dict(), "step": step}, resume + ".tmp")
+        os.replace(resume + ".tmp", resume)
+
+    amp = torch.autocast("cuda", dtype=torch.bfloat16) if args.amp else torch.autocast("cpu", enabled=False)
+    log = open(os.path.join(args.out, "log.jsonl"), "a")
     t0, tl = time.time(), 0.0
-    for step in range(steps):
+    for step in range(start, steps):
         ids = order[step * args.batch:(step + 1) * args.batch]
         w = torch.from_numpy(np.stack([data[i * W:(i + 1) * W] for i in ids]).astype(np.int64))
+        w = w.to(args.device, non_blocking=True)
         for g in opt.param_groups:
             g["lr"] = lr_at(step)
-        loss = lm_loss(model, w[:, :-1], w[:, 1:])
+        with amp:
+            loss = lm_loss(model, w[:, :-1], w[:, 1:])
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         opt.step()
@@ -77,14 +108,16 @@ def main():
         tl += loss.item()
         if (step + 1) % 50 == 0:
             el = time.time() - t0
+            done = step + 1 - start
             print(f"step {step + 1}/{steps} loss {tl / 50:.3f} lr {lr_at(step):.2e}"
-                  f" {(step + 1) * args.batch * cfg.ctx / el:,.0f} tok/s"
-                  f" eta {el / (step + 1) * (steps - step - 1) / 60:.0f}m", flush=True)
+                  f" {done * args.batch * cfg.ctx / el:,.0f} tok/s"
+                  f" eta {el / done * (steps - step - 1) / 60:.0f}m", flush=True)
             tl = 0.0
         if (step + 1) % args.eval_every == 0 or step + 1 == steps:
             model.eval()
             model.mem.record = True
-            vl = evals.lm_eval(model, vx, vy)
+            with amp:
+                vl = evals.lm_eval(model, vx, vy)
             used = torch.unique(model.mem.last_idx).numel() / model.mem.n_slots
             model.mem.record = False
             c_in = probe_in.run(model)[0]
@@ -92,12 +125,12 @@ def main():
             model.train()
             rec = {"step": step + 1, "tokens": (step + 1) * args.batch * cfg.ctx,
                    "val_loss": vl, "old_acc_in": float(c_in.mean()),
-                   "old_acc_heldout": float(c_out.mean()), "slot_use_last_batch": used}
+                   "old_acc_heldout": float(c_out.mean()), "slot_use_last_batch": used,
+                   "elapsed_s": time.time() - t0}
             print(json.dumps(rec), flush=True)
             log.write(json.dumps(rec) + "\n")
             log.flush()
-            torch.save({"cfg": dataclasses.asdict(cfg), "model": model.state_dict()},
-                       os.path.join(args.out, "model.pt"))
+            save(step + 1)
 
 
 if __name__ == "__main__":

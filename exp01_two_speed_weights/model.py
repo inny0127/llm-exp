@@ -27,6 +27,15 @@ class GPTConfig:
     mem_k_dim: int = 128    # query dim, split into two product-key halves
 
 
+# "tiny" is Exp 01/02 (3.8M dense params, 65K slots); "small" is the ~30M scale of the
+# thread's tier-1 plan, with Meta's ratio of memory to dense parameters.
+PRESETS = {
+    "tiny": {},
+    "small": dict(ctx=256, n_layer=8, n_head=8, d_model=512, d_ff=2048, mem_layer=4,
+                  mem_n_keys=512, mem_heads=4, mem_topk=32, mem_k_dim=256),
+}
+
+
 class Attention(nn.Module):
     def __init__(self, c):
         super().__init__()
@@ -74,18 +83,21 @@ class ProductKeyMemory(nn.Module):
     def forward(self, x):
         B, T, C = x.shape
         xf = x.reshape(B * T, C)
-        q = F.layer_norm(self.query(xf).view(B * T, self.h, 2, self.half), (self.half,))
-        s = torch.einsum("nhpd,hpkd->nhpk", q, self.keys)
-        s1, i1 = s[:, :, 0].topk(self.k, dim=-1)
-        s2, i2 = s[:, :, 1].topk(self.k, dim=-1)
-        cand = (s1.unsqueeze(-1) + s2.unsqueeze(-2)).flatten(-2)
-        sc, ci = cand.topk(self.k, dim=-1)
+        # Slot routing in fp32 even under bf16 autocast, so pretraining (bf16) and the
+        # streams (fp32) pick the same slots; a no-op on CPU.
+        with torch.autocast(x.device.type, enabled=False):
+            q = F.layer_norm(self.query(xf.float()).view(B * T, self.h, 2, self.half), (self.half,))
+            s = torch.einsum("nhpd,hpkd->nhpk", q, self.keys)
+            s1, i1 = s[:, :, 0].topk(self.k, dim=-1)
+            s2, i2 = s[:, :, 1].topk(self.k, dim=-1)
+            cand = (s1.unsqueeze(-1) + s2.unsqueeze(-2)).flatten(-2)
+            sc, ci = cand.topk(self.k, dim=-1)
         idx = i1.gather(-1, ci // self.k) * self.n_keys + i2.gather(-1, ci % self.k)
         if self.record:
             self.last_idx = idx.view(B, T, self.h * self.k).detach()
         w = F.softmax(sc, dim=-1)
         y = F.embedding_bag(idx.view(-1, self.k), self.values,
-                            per_sample_weights=w.reshape(-1, self.k), mode="sum")
+                            per_sample_weights=w.reshape(-1, self.k).to(self.values.dtype), mode="sum")
         y = y.view(B * T, self.h, C).sum(1)
         return self.out(y * F.silu(self.gate(xf))).view(B, T, C)
 
@@ -122,6 +134,7 @@ class GPT(nn.Module):
         return self.blocks[self.cfg.mem_layer].ffn
 
     def forward(self, idx):
+        idx = idx.to(self.tok.weight.device)  # callers keep data on the CPU
         T = idx.shape[1]
         x = self.tok(idx) + self.pos(torch.arange(T, device=idx.device))
         for b in self.blocks:
@@ -140,10 +153,11 @@ class GPT(nn.Module):
 
 def lm_loss(model, x, y, mask=None):
     logits = model(x)
-    loss = F.cross_entropy(logits.view(-1, logits.size(-1)), y.reshape(-1), reduction="none")
+    y = y.to(logits.device)
+    loss = F.cross_entropy(logits.view(-1, logits.size(-1)).float(), y.reshape(-1), reduction="none")
     if mask is None:
         return loss.mean()
-    mask = mask.reshape(-1).float()
+    mask = mask.reshape(-1).float().to(logits.device)
     return (loss * mask).sum() / mask.sum()
 
 
@@ -151,8 +165,9 @@ class LoRALinear(nn.Module):
     def __init__(self, base, r, alpha):
         super().__init__()
         self.base = base
-        self.lora_A = nn.Parameter(torch.randn(r, base.in_features) / math.sqrt(base.in_features))
-        self.lora_B = nn.Parameter(torch.zeros(base.out_features, r))
+        dev = base.weight.device
+        self.lora_A = nn.Parameter(torch.randn(r, base.in_features, device=dev) / math.sqrt(base.in_features))
+        self.lora_B = nn.Parameter(torch.zeros(base.out_features, r, device=dev))
         self.scale = alpha / r
 
     def forward(self, x):

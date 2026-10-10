@@ -39,7 +39,7 @@ def encode_docs(tok, docs, eot_id):
     out = []
     for i in range(0, len(docs), 4096):
         for enc in tok.encode_batch(docs[i:i + 4096]):
-            out.append(enc.ids + [eot_id])
+            out.append(np.array(enc.ids + [eot_id], dtype=np.uint16))
     return out
 
 
@@ -52,11 +52,13 @@ def main():
     ap.add_argument("--bios_per_old", type=int, default=100)
     ap.add_argument("--n_streams", type=int, default=5)
     ap.add_argument("--stream_len", type=int, default=1000)
+    ap.add_argument("--train_file", default="TinyStoriesV2-GPT4-train-head200MB.txt")
+    ap.add_argument("--max_mb", type=int, default=200, help="read at most this much (0 = all)")
     args = ap.parse_args()
     raw = os.path.join(args.data_dir, "raw")
 
-    train_stories = read_stories(os.path.join(raw, "TinyStoriesV2-GPT4-train-head200MB.txt"),
-                                 max_bytes=200 * 2**20)
+    train_stories = read_stories(os.path.join(raw, args.train_file),
+                                 max_bytes=args.max_mb * 2**20 or None)
     val_stories = read_stories(os.path.join(raw, "TinyStoriesV2-GPT4-valid.txt"))
     print(f"stories: train {len(train_stories)}, val {len(val_stories)}")
 
@@ -101,9 +103,8 @@ def main():
             break
     docs = story_ids + bio_ids
     rng.shuffle(docs)
-    train = np.fromiter((t for d in docs for t in d), dtype=np.uint16)
-    val = np.fromiter((t for d in encode_docs(tok, val_stories, eot_id) for t in d),
-                      dtype=np.uint16)
+    train = np.concatenate(docs)
+    val = np.concatenate(encode_docs(tok, val_stories, eot_id))
     train.tofile(os.path.join(args.data_dir, "train.bin"))
     val.tofile(os.path.join(args.data_dir, "val.bin"))
 

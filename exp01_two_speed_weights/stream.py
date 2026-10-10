@@ -96,7 +96,9 @@ def eval_doc_mask(train_bin, tok, names, cache):
     that mentions one of these names. Rejecting windows that overlap it also catches windows
     that start or end mid-name, which a regex on the window text misses."""
     if os.path.exists(cache):
-        return np.load(cache)
+        mask = np.load(cache)
+        assert len(mask) == os.path.getsize(train_bin) // 2, f"{cache} is for another train.bin; delete it"
+        return mask
     data = np.fromfile(train_bin, dtype=np.uint16)
     eot = tok.token_to_id(EOT)
     ends = np.flatnonzero(data == eot)
@@ -114,7 +116,9 @@ def eval_doc_mask(train_bin, tok, names, cache):
 
 def touches_mask(mask, ctx):
     """Predicate on a window start index: does [i, i + ctx] touch the mask?"""
-    csum = np.concatenate([[0], np.cumsum(mask, dtype=np.int64)])
+    # int32 halves the RAM of each parallel run on a 300M-token corpus; the counts are identical
+    csum = np.zeros(len(mask) + 1, dtype=np.int32 if len(mask) < 2**31 else np.int64)
+    np.cumsum(mask, dtype=csum.dtype, out=csum[1:])
     return lambda i: csum[i + ctx + 1] - csum[i] > 0
 
 
@@ -132,8 +136,8 @@ def protected_counts(model, tok, pool, cache, tids=range(8)):
         for i in range(0, len(p.x), 512):
             x, lens = p.x[i:i + 512], p.lens[i:i + 512]
             model(x[:, :int(lens.max())])
-            valid = torch.arange(int(lens.max()))[None, :] < lens[:, None]
-            P += torch.bincount(model.mem.last_idx[valid].reshape(-1), minlength=model.mem.n_slots)
+            valid = (torch.arange(int(lens.max()))[None, :] < lens[:, None]).to(model.mem.last_idx.device)
+            P += torch.bincount(model.mem.last_idx[valid].reshape(-1), minlength=model.mem.n_slots).cpu()
     model.mem.record = False
     torch.save(P, cache)
     return P
@@ -172,7 +176,7 @@ def background_df(model, train_bin, n_batches, windows_per_batch, cache):
     for _ in range(n_batches):
         x, _ = rp.sample(windows_per_batch)
         model(x)
-        df[torch.unique(model.mem.last_idx)] += 1
+        df[torch.unique(model.mem.last_idx).cpu()] += 1
     model.mem.record = False
     torch.save(df, cache)
     return df
@@ -183,13 +187,14 @@ class SparseWriter:
 
     def __init__(self, model, lr, t, idf, protect=None):
         self.model, self.lr, self.t = model, lr, t
+        dev = model.mem.values.device
         # Soft protection divides by (1 + gamma * P); P = 0 reproduces Exp 01 exactly.
-        self.idf = idf if protect is None else idf / (1 + protect)
+        self.idf = (idf if protect is None else idf / (1 + protect)).to(dev)
         for p in model.parameters():
             p.requires_grad_(False)
         model.mem.values.requires_grad_(True)
-        self.written = torch.zeros(model.mem.n_slots, dtype=torch.bool)  # since last reset
-        self.ever = torch.zeros(model.mem.n_slots, dtype=torch.bool)
+        self.written = torch.zeros(model.mem.n_slots, dtype=torch.bool, device=dev)  # since last reset
+        self.ever = torch.zeros(model.mem.n_slots, dtype=torch.bool, device=dev)
 
     def select(self, x, mask):
         mem = self.model.mem
@@ -197,7 +202,8 @@ class SparseWriter:
         with torch.no_grad():
             self.model(x)
         mem.record = False
-        counts = torch.bincount(mem.last_idx[mask].reshape(-1), minlength=mem.n_slots).float()
+        counts = torch.bincount(mem.last_idx[mask.to(mem.last_idx.device)].reshape(-1),
+                                minlength=mem.n_slots).float()
         score = counts / counts.sum() * self.idf
         return score.topk(self.t).indices
 
@@ -373,6 +379,7 @@ def main():
     ap.add_argument("--out", default="runs/stream")
     ap.add_argument("--name", default="")
     ap.add_argument("--threads", type=int, default=1)
+    ap.add_argument("--device", default="cpu", help="cpu or cuda")
     args = ap.parse_args()
     torch.set_num_threads(args.threads)
     torch.manual_seed(args.seed)
@@ -388,8 +395,12 @@ def main():
         fj = json.load(f)
     stream = fj["streams"][args.seed][:args.n_facts]
     args.tok, args.stream = tok, stream
-    model = load_model(args.pretrained)
-    pretrained_values = model.mem.values.detach().clone()
+    model = load_model(args.pretrained).to(args.device)
+    if args.device.startswith("cuda"):
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+    # only sleep's slot reset reads it (0.5 GB at the small scale)
+    pretrained_values = model.mem.values.detach().clone() if args.sleep and args.arm == "C" else None
     assert not (args.sleep_ewc > 0 and not args.clean_replay), "EWC Fisher needs --clean_replay"
     args.rehearse_tids = list(range(8)) if args.rehearse_templates == "all" else \
         [t for t in range(8) if t not in (facts.PROBE_IN, facts.PROBE_HELDOUT)]
@@ -499,8 +510,9 @@ def main():
            "slot_overlap": overlaps, "write_steps": write_steps, "checkpoints": ckpts,
            "sleeps": sleeps,
            "replay_rejected": replay.rejected, "seconds": time.time() - t0}
-    with open(out_path, "w") as f:
+    with open(out_path + ".tmp", "w") as f:  # atomic: a copy taken mid-write never looks finished
         json.dump(res, f)
+    os.replace(out_path + ".tmp", out_path)
 
 
 if __name__ == "__main__":

@@ -34,6 +34,7 @@ WRITERS = {
                                                 "protect_templates": "stream"}),
     "pnpans": ("Protected answer-only writer, P from templates 1-6",
                {"write_loss": "answer", "protect_gamma": 1.0, "protect_templates": "nonprobe"}),
+    "A": ("Full fine-tuning", {"arm": "A"}),  # Exp 03 reference
 }
 GENTLE = {"sleep": True, "sleep_fact_loss": "answer", "sleep_rehearse": 16, "sleep_freeze": "embed",
           "clean_replay": True, "rehearse_templates": "nonprobe"}
@@ -43,11 +44,11 @@ SLEEPS = {
     "gentle": ("gentle sleep", GENTLE),
     "gentle32": ("gentle sleep (32 rehearsal)", {**GENTLE, "sleep_rehearse": 32}),
 }
-COLOURS = {"C": "#2a78d6", "ans": "#1baf7a", "p06ans": "#eb6834", "pnpans": "#eda100"}
+COLOURS = {"C": "#2a78d6", "ans": "#1baf7a", "p06ans": "#eb6834", "pnpans": "#eda100", "A": "#8a63d2"}
 FU1_BAR = {"old_drop": 10.0, "ret_in": 0.45, "old_drop_out": 10.0, "ret_out": 0.40}  # last two: guards
 FU2_BAR = {"d_nll": 0.02, "old_drop": 3.0, "ret_in": 0.10, "old_drop_out": 3.0, "ret_out": 0.10,
            "consol": 0.01}  # paired; old_drop_out / ret_out are guards; consol = mean(pre_all - post_all)
-GENTLE_DAMAGE = 3.0  # summed dense damage (pts) over the 4 sleeps that still counts as gentle
+GENTLE_DAMAGE = 0.75  # dense damage (pts) per sleep that still counts as gentle: 3.0 over Exp 02's 4 sleeps
 
 
 def parse_arm(arm):
@@ -88,6 +89,7 @@ def load(dirs, seeds, arms_wanted=None):
             if sl and "old_after_reset" in sl[0]:  # summed over the run's sleeps
                 m["reset_gain"] = 100 * float(np.sum([s["old_after_reset"] - s["old_before"] for s in sl]))
                 m["dense_damage"] = 100 * float(np.sum([s["old_after_reset"] - s["old_after_sleep"] for s in sl]))
+            m["n_sleeps"] = len(sl)
             m["seed"] = r["args"]["seed"]
             groups[(arm, float(r["args"]["lr"]))].append(m)
     return groups
@@ -100,7 +102,7 @@ def summarize(groups):
         row["per_seed"] = {m["seed"]: {k: m.get(k) for k in ("ret_in", "ret_out", "old_drop", "old_drop_out", "d_nll")}
                            for m in ms}
         for k in ("acq_in", "ret_in", "ret_out", "ret_early", "old_drop", "old_drop_out", "d_nll", "steps",
-                  "cap_frac", "reset_gain", "dense_damage", "consol"):
+                  "cap_frac", "reset_gain", "dense_damage", "consol", "n_sleeps"):
             vals = [m[k] for m in ms if m.get(k) is not None]
             row[k], row[k + "_sd"] = (float(np.mean(vals)), float(np.std(vals))) if vals else (None, None)
         rows[(arm, lr)] = row
@@ -135,7 +137,8 @@ def paired(groups, rows, n_seeds):
                     **eff, **sd, "per_seed": diffs, "checks": checks, "marginal": marginal,
                     "reset_gain_sum": rows[(arm, lr)]["reset_gain"], "dense_damage_sum": dmg,
                     "consol": consol,
-                    "kind": (None if dmg is None else "gentle consolidation" if dmg <= GENTLE_DAMAGE else
+                    "kind": (None if dmg is None else "gentle consolidation"
+                             if dmg <= GENTLE_DAMAGE * rows[(arm, lr)]["n_sleeps"] else
                              f"passes through slot-reset repair; the dense update still costs {dmg:.1f} pts"),
                     "passes_fu2_bar": bool(all(checks.values())) if complete else "incomplete"})
     return out
