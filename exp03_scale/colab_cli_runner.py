@@ -29,6 +29,7 @@ class Runner:
         self.state = json.load(open(self.state_path)) if os.path.exists(self.state_path) else {}
         self.last_resume_dl = 0.0
         self.crashes = 0
+        self.api_broken = False  # set when this runtime's file API returns 500
 
     def log(self, *msg):
         line = time.strftime("%H:%M:%S ") + " ".join(map(str, msg))
@@ -142,16 +143,24 @@ print(json.dumps(m))
         for rel, (size, mtime) in sorted(man.items(), key=lambda kv: kv[1][0]):
             if self.state.get(rel) == [size, mtime] or not self.want(rel, size, man):
                 continue
+            if "/logs/" in rel and rel.replace("/logs/", "/").rsplit(".", 1)[0] + ".json" not in man:
+                continue
             dst = os.path.join(self.mirror, rel)
             os.makedirs(os.path.dirname(dst), exist_ok=True)
-            rc, out = self.run(["download", "-s", self.a.session, f"{REMOTE}/{rel}", dst + ".tmp"], timeout=3600)
-            if rc or "failed" in out.lower():
+            ok = False
+            if not self.api_broken:
+                rc, out = self.run(["download", "-s", self.a.session, f"{REMOTE}/{rel}", dst + ".dl"], timeout=3600)
+                ok = rc == 0 and "failed" not in out.lower()
+                self.api_broken = not ok and "500" in out
+            if ok:
+                os.replace(dst + ".dl", dst)
+            else:
                 try:  # the runtime's file API sometimes returns 500: pull it through the kernel instead
                     self.fetch(rel, size, dst + ".tmp")
                 except Exception as e:  # noqa: BLE001
                     self.log("download failed:", rel, str(e)[-200:])
                     continue
-            os.replace(dst + ".tmp", dst)
+                os.replace(dst + ".tmp", dst)
             self.state[rel] = [size, mtime]
             json.dump(self.state, open(self.state_path, "w"))
             got += 1
@@ -159,22 +168,30 @@ print(json.dumps(m))
                 self.last_resume_dl = time.time()
         return got, man
 
-    def fetch(self, rel, size, dst, chunk=12 * 2**20):
-        """Copy a remote file in base64 chunks over `colab exec`; checked by size and sha256."""
+    def fetch(self, rel, size, dst, chunk=4 * 2**20):
+        """Copy a remote file in base64 chunks over `colab exec`, resuming a partial copy;
+        checked by size and sha256."""
         import base64
         import hashlib
-        h = hashlib.sha256()
-        with open(dst, "wb") as f:
-            for off in range(0, max(size, 1), chunk):
+        have = os.path.getsize(dst) if os.path.exists(dst) else 0
+        have -= have % chunk
+        with open(dst, "r+b" if os.path.exists(dst) else "wb") as f:
+            f.truncate(have)
+            f.seek(have)
+            for off in range(have, max(size, 1), chunk):
                 b = self.py(f"import base64\nwith open('{REMOTE}/{rel}','rb') as f:\n    f.seek({off})\n"
                             f"    print(base64.b64encode(f.read({chunk})).decode())", timeout=300)
-                data = base64.b64decode(b)
-                f.write(data)
-                h.update(data)
+                f.write(base64.b64decode(b))
+                f.flush()
+        h = hashlib.sha256()
+        with open(dst, "rb") as f:
+            for c in iter(lambda: f.read(1 << 24), b""):
+                h.update(c)
         remote = self.py(f"import hashlib\nh=hashlib.sha256()\nwith open('{REMOTE}/{rel}','rb') as f:\n"
                          f"    [h.update(c) for c in iter(lambda: f.read(1<<24), b'')]\nprint(h.hexdigest())",
                          timeout=300)
         if os.path.getsize(dst) != size or remote != h.hexdigest():
+            os.remove(dst)
             raise RuntimeError(f"{rel}: size or checksum mismatch (changed while copying?)")
 
     def tail(self, n=1200):
@@ -188,6 +205,7 @@ print(json.dumps(m))
                 if not self.alive():
                     self.log("no runtime; creating one")
                     self.new_session()
+                    self.api_broken = False
                     self.setup()
                     fresh = True
                 if not self.driver_running():
