@@ -1,0 +1,12 @@
+{"step": 500, "tokens": 2048000, "val_loss": 3.1466017961502075, "old_acc_in": 0.07833333333333334, "old_acc_heldout": 0.07166666666666667, "slot_use_last_batch": 0.1673431396484375}
+{"step": 1000, "tokens": 4096000, "val_loss": 2.7625679969787598, "old_acc_in": 0.065, "old_acc_heldout": 0.06666666666666667, "slot_use_last_batch": 0.2298126220703125}
+{"step": 1500, "tokens": 6144000, "val_loss": 2.579859137535095, "old_acc_in": 0.135, "old_acc_heldout": 0.13666666666666666, "slot_use_last_batch": 0.3001556396484375}
+{"step": 2000, "tokens": 8192000, "val_loss": 2.449894905090332, "old_acc_in": 0.21666666666666667, "old_acc_heldout": 0.22166666666666668, "slot_use_last_batch": 0.35540771484375}
+{"step": 2500, "tokens": 10240000, "val_loss": 2.3518640995025635, "old_acc_in": 0.38166666666666665, "old_acc_heldout": 0.37666666666666665, "slot_use_last_batch": 0.409271240234375}
+{"step": 3000, "tokens": 12288000, "val_loss": 2.2834389209747314, "old_acc_in": 0.635, "old_acc_heldout": 0.655, "slot_use_last_batch": 0.4430084228515625}
+{"step": 3500, "tokens": 14336000, "val_loss": 2.204787492752075, "old_acc_in": 0.8116666666666666, "old_acc_heldout": 0.8016666666666666, "slot_use_last_batch": 0.4691314697265625}
+{"step": 4000, "tokens": 16384000, "val_loss": 2.147417187690735, "old_acc_in": 0.9233333333333333, "old_acc_heldout": 0.9283333333333333, "slot_use_last_batch": 0.4969635009765625}
+{"step": 4500, "tokens": 18432000, "val_loss": 2.094293236732483, "old_acc_in": 0.97, "old_acc_heldout": 0.9766666666666667, "slot_use_last_batch": 0.507720947265625}
+{"step": 5000, "tokens": 20480000, "val_loss": 2.0625444650650024, "old_acc_in": 0.9866666666666667, "old_acc_heldout": 0.9916666666666667, "slot_use_last_batch": 0.5166778564453125}
+{"step": 5500, "tokens": 22528000, "val_loss": 2.0362030267715454, "old_acc_in": 0.995, "old_acc_heldout": 1.0, "slot_use_last_batch": 0.5245208740234375}
+{"step": 5813, "tokens": 23810048, "val_loss": 2.020178258419037, "old_acc_in": 0.9866666666666667, "old_acc_heldout": 0.9916666666666667, "slot_use_last_batch": 0.532379150390625}

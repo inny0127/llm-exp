@@ -48,6 +48,9 @@ def run_metrics(r):
         "sleep_pre": [s["pre_recent"] for s in sl], "sleep_post": [s["post_recent"] for s in sl],
         "seconds": r["seconds"], "old0": c0["old_in"], "nll0": c0["val_loss"],
         "acq0": float(np.mean(c0["ret_in"])) if c0.get("ret_in") else 0.0,
+        "ckpt_x": [c["n_seen"] for c in r["checkpoints"]],
+        "old_curve": [c["old_in"] for c in r["checkpoints"]],
+        "nll_curve": [c["val_loss"] - c0["val_loss"] for c in r["checkpoints"]],
         "steps": float(np.mean(r["write_steps"])) if r.get("write_steps") else None,
         "steps_bins": binned(r["write_steps"], nb) if r.get("write_steps") else None,
         "cap_frac": (float(np.mean(np.asarray(r["write_steps"]) >= r["args"]["steps"]))
@@ -193,9 +196,10 @@ def plot_frontier(agg, ops, path):
             hollow = arm.endswith("+sleep")
             ax.scatter(xs, ys, s=64, zorder=3, facecolor=SURF if hollow else COLOR[arm],
                        edgecolor=COLOR[arm] if hollow else SURF, linewidth=2)
-            lr, m = max(pts, key=lambda t: t[1]["ret_in"])
-            ax.annotate(LABEL[arm], (m[key], m["ret_in"]), xytext=(6, 4),
-                        textcoords="offset points", fontsize=8.5, color=INK2)
+            if arm.startswith("C"):  # the dense arms cluster; the legend names them
+                lr, m = max(pts, key=lambda t: t[1]["ret_in"])
+                ax.annotate(LABEL[arm], (m[key], m["ret_in"]), xytext=(6, 4),
+                            textcoords="offset points", fontsize=8.5, color=INK2)
         ax.set_xlabel(xlabel, color=INK2, fontsize=10)
         lo = min(0, min(m[key] for (_, _), m in agg.items()))
         hi = max(m[key] for (_, _), m in agg.items())
@@ -229,6 +233,32 @@ def plot_position(agg, ops, path):
     axes[0].set_ylim(0, 1)
     axes[1].legend(frameon=False, fontsize=9, labelcolor=INK2, loc="upper left")
     fig.suptitle("Each arm at its operating point, or its least-forgetting LR if none is within budget",
+                 color=INK, fontsize=11.5, x=0.01, ha="left")
+    fig.tight_layout()
+    fig.savefig(path, dpi=150, facecolor=SURF)
+    plt.close(fig)
+
+
+def plot_forgetting(agg, ops, path):
+    fig, axes = plt.subplots(1, 2, figsize=(11, 4.2), facecolor=SURF)
+    for ax, key, ylabel in [(axes[0], "old_curve", "Old-fact accuracy"),
+                            (axes[1], "nll_curve", "Held-out loss increase (nats/token)")]:
+        style(ax)
+        for arm in ARMS:
+            c = chosen(agg, ops, arm)
+            if not c:
+                continue
+            lr, m = c
+            ax.plot(m["ckpt_x"], m[key], DASH[arm], color=COLOR[arm], linewidth=2,
+                    label=f"{LABEL[arm]} (lr {lr:g})")
+            ax.scatter(m["ckpt_x"], m[key], s=40, zorder=3,
+                       facecolor=SURF if arm.endswith("+sleep") else COLOR[arm],
+                       edgecolor=COLOR[arm] if arm.endswith("+sleep") else SURF, linewidth=2)
+        ax.set_xlabel("New facts learned", color=INK2, fontsize=10)
+        ax.set_ylabel(ylabel, color=INK2, fontsize=10)
+    axes[0].set_ylim(0, 1.02)
+    axes[0].legend(frameon=False, fontsize=8.5, labelcolor=INK2, loc="lower left")
+    fig.suptitle("What learning new facts costs old knowledge (least-forgetting LR per arm)",
                  color=INK, fontsize=11.5, x=0.01, ha="left")
     fig.tight_layout()
     fig.savefig(path, dpi=150, facecolor=SURF)
@@ -300,6 +330,7 @@ def main():
     plot_frontier(agg, ops, os.path.join(args.out, f"frontier_{tag}.png"))
     plot_position(agg, ops, os.path.join(args.out, f"position_{tag}.png"))
     plot_sleep(agg, ops, os.path.join(args.out, f"sleep_{tag}.png"))
+    plot_forgetting(agg, ops, os.path.join(args.out, f"forgetting_{tag}.png"))
     md = table(agg, ops)
     with open(os.path.join(args.out, f"table_{tag}.md"), "w") as f:
         f.write(md + "\n")

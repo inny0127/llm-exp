@@ -8,7 +8,8 @@ during a "sleep" and free the slots (slow).
 - `DESIGN.md`: the pre-registered design and decision rules (committed before
   any results).
 - `RESULTS.md`: what happened and the verdict.
-- `results/`: figures, tables and the decision JSON for each seed set.
+- `results/`: figures, tables and the decision JSON for each seed set, the
+  pretraining log, and `raw_runs.tar.gz` with every dev and test run.
 
 ## Files
 
@@ -21,6 +22,7 @@ during a "sleep" and free the slots (slow).
 | `stream.py` | One continual-learning run: arm (A full FT, B LoRA, C sparse memory), LR, seed, optional sleep |
 | `sweep.py` | Runs the frozen LR grid for every arm in parallel, one thread per run |
 | `analyze.py` | Aggregates runs, applies the decision rules, draws the figures |
+| `slot_probe.py` | Which token roles the TF-IDF-selected slots come from, and their overlap with old facts' slots |
 | `run_all.sh` | Everything above, end to end |
 
 ## Reproduce
