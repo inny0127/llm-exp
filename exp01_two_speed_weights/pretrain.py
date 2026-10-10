@@ -51,7 +51,7 @@ def main():
     W = cfg.ctx + 1
     n_win = len(data) // W
     order = np.random.default_rng(0).permutation(n_win)
-    steps = n_win // args.batch if not args.max_steps else args.max_steps
+    steps = n_win // args.batch if not args.max_steps else min(args.max_steps, n_win // args.batch)
     vx, vy = evals.val_windows(os.path.join(args.data_dir, "val.bin"), 128, cfg.ctx)
     items = evals.old_fact_items(old, 100)
     probe_in = evals.Probe(tok, items, 0)
