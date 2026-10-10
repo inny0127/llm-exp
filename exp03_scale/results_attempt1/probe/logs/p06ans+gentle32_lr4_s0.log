@@ -1,0 +1,9 @@
+[p06ans+gentle32_lr4_s0] 25 facts: acq_in 1.00 ret_in 1.00 ret_out 0.88 val 1.269 old_in 1.000 (7s)
+[p06ans+gentle32_lr4_s0] 50 facts: acq_in 1.00 ret_in 1.00 ret_out 0.90 val 1.269 old_in 1.000 (13s)
+[p06ans+gentle32_lr4_s0] 75 facts: acq_in 1.00 ret_in 1.00 ret_out 0.85 val 1.269 old_in 1.000 (19s)
+{"self_label_acc": 1.0, "sleep_steps": 66, "sleep_sents": 700, "old_before": 1.0, "old_after_reset": 1.0, "old_after_sleep": 0.9916666666666667, "n_seen": 100, "pre_recent": 1.0, "post_recent": 1.0, "pre_all": 1.0, "post_all": 1.0}
+[p06ans+gentle32_lr4_s0] 100 facts: acq_in 1.00 ret_in 1.00 ret_out 1.00 val 1.271 old_in 0.992 (75s)
+[p06ans+gentle32_lr4_s0] 125 facts: acq_in 1.00 ret_in 1.00 ret_out 0.99 val 1.271 old_in 0.992 (81s)
+[p06ans+gentle32_lr4_s0] 150 facts: acq_in 1.00 ret_in 1.00 ret_out 0.96 val 1.271 old_in 0.992 (87s)
+[p06ans+gentle32_lr4_s0] 175 facts: acq_in 1.00 ret_in 1.00 ret_out 0.94 val 1.271 old_in 0.992 (93s)
+[p06ans+gentle32_lr4_s0] 200 facts: acq_in 1.00 ret_in 0.99 ret_out 0.92 val 1.271 old_in 0.992 (96s)

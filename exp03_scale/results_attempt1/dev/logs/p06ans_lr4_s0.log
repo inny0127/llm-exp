@@ -1,0 +1,8 @@
+[p06ans_lr4_s0] 250 facts: acq_in 1.00 ret_in 1.00 ret_out 0.80 val 1.269 old_in 1.000 (38s)
+[p06ans_lr4_s0] 500 facts: acq_in 1.00 ret_in 0.98 ret_out 0.80 val 1.269 old_in 0.998 (69s)
+[p06ans_lr4_s0] 750 facts: acq_in 1.00 ret_in 0.97 ret_out 0.82 val 1.269 old_in 0.998 (100s)
+[p06ans_lr4_s0] 1000 facts: acq_in 1.00 ret_in 0.97 ret_out 0.82 val 1.270 old_in 0.998 (132s)
+[p06ans_lr4_s0] 1250 facts: acq_in 1.00 ret_in 0.97 ret_out 0.81 val 1.270 old_in 0.998 (164s)
+[p06ans_lr4_s0] 1500 facts: acq_in 1.00 ret_in 0.96 ret_out 0.81 val 1.270 old_in 0.997 (196s)
+[p06ans_lr4_s0] 1750 facts: acq_in 1.00 ret_in 0.96 ret_out 0.81 val 1.270 old_in 0.997 (230s)
+[p06ans_lr4_s0] 2000 facts: acq_in 1.00 ret_in 0.96 ret_out 0.81 val 1.270 old_in 0.997 (263s)

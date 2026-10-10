@@ -1,0 +1,6 @@
+{
+ "sec_per_step": 0.4046656131744385,
+ "pretrain_steps": 18239,
+ "pretrain_minutes": 123.01160197814306,
+ "pretrain_cu": 0.0
+}

@@ -1,0 +1,10 @@
+{"step": 2000, "tokens": 32768000, "val_loss": 1.771403431892395, "old_acc_in": 0.085, "old_acc_heldout": 0.07, "slot_use_last_batch": 0.5750274658203125, "elapsed_s": 880.7018377780914}
+{"step": 4000, "tokens": 65536000, "val_loss": 1.5909465551376343, "old_acc_in": 0.09333333333333334, "old_acc_heldout": 0.07166666666666667, "slot_use_last_batch": 0.7216682434082031, "elapsed_s": 1801.1473977565765}
+{"step": 6000, "tokens": 98304000, "val_loss": 1.4995331764221191, "old_acc_in": 0.20833333333333334, "old_acc_heldout": 0.22333333333333333, "slot_use_last_batch": 0.7853469848632812, "elapsed_s": 2724.5084235668182}
+{"step": 8000, "tokens": 131072000, "val_loss": 1.4391608238220215, "old_acc_in": 0.6533333333333333, "old_acc_heldout": 0.65, "slot_use_last_batch": 0.8154792785644531, "elapsed_s": 3649.5490844249725}
+{"step": 10000, "tokens": 163840000, "val_loss": 1.3877314925193787, "old_acc_in": 0.9283333333333333, "old_acc_heldout": 0.94, "slot_use_last_batch": 0.8320579528808594, "elapsed_s": 4565.614554405212}
+{"step": 12000, "tokens": 196608000, "val_loss": 1.3481374979019165, "old_acc_in": 0.9916666666666667, "old_acc_heldout": 0.9933333333333333, "slot_use_last_batch": 0.8411979675292969, "elapsed_s": 5487.029740333557}
+{"step": 14000, "tokens": 229376000, "val_loss": 1.3125578165054321, "old_acc_in": 0.9966666666666667, "old_acc_heldout": 0.9983333333333333, "slot_use_last_batch": 0.8519248962402344, "elapsed_s": 6413.210646390915}
+{"step": 16000, "tokens": 262144000, "val_loss": 1.2838163375854492, "old_acc_in": 0.995, "old_acc_heldout": 1.0, "slot_use_last_batch": 0.8519554138183594, "elapsed_s": 7327.52428984642}
+{"step": 18000, "tokens": 294912000, "val_loss": 1.2698323726654053, "old_acc_in": 0.9983333333333333, "old_acc_heldout": 1.0, "slot_use_last_batch": 0.8567237854003906, "elapsed_s": 8247.343832492828}
+{"step": 18239, "tokens": 298827776, "val_loss": 1.2690967917442322, "old_acc_in": 1.0, "old_acc_heldout": 1.0, "slot_use_last_batch": 0.8550262451171875, "elapsed_s": 8376.790338039398}

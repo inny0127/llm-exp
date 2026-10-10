@@ -1,0 +1,21 @@
+{
+ "concurrency_measured": 2,
+ "seconds_per_fact": {
+  "C": 0.21649689912796022,
+  "p06ans": 0.2355885124206543,
+  "A": 0.45700286388397215
+ },
+ "sleep_seconds_per_sentence": 0.06983063970293317,
+ "est_run_minutes": {
+  "C": 7.21656330426534,
+  "p06ans": 7.85295041402181,
+  "A": 15.233428796132406,
+  "C+gentle32": 62.499153069087434,
+  "p06ans+gentle32": 63.135540178843904
+ },
+ "runs_planned": 25,
+ "projected_wall_minutes": 283.2873426221666,
+ "projected_cu": 0.0,
+ "spent_cu": 0.0,
+ "budget_cu": 1000000000.0
+}
