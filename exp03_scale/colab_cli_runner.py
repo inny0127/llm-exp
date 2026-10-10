@@ -10,6 +10,7 @@ Needs `colab` (pip install google-colab-cli) already authenticated.
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -52,6 +53,20 @@ class Runner:
             return out.split("<<<", 1)[1].rsplit(">>>", 1)[0].strip()
         raise RuntimeError(out[-800:])
 
+    def scp(self, src, dst, timeout=3600):
+        """scp through `colab ssh --proxy-mode` (about 20 MB/s); remote paths start with ':'."""
+        if not shutil.which("scp"):
+            return False
+        proxy = f"ProxyCommand={' '.join(self.cli)} ssh --proxy-mode -s {self.a.session}"
+        fix = lambda x: "root@colab" + x if x.startswith(":") else x  # noqa: E731
+        try:
+            r = subprocess.run(["scp", "-q", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null",
+                                "-o", "LogLevel=ERROR", "-o", proxy, fix(src), fix(dst)],
+                               capture_output=True, text=True, timeout=timeout)
+            return r.returncode == 0
+        except subprocess.TimeoutExpired:
+            return False
+
     def alive(self):
         rc, out = self.run(["sessions"], timeout=120)
         return f"[{self.a.session}]" in out
@@ -87,9 +102,11 @@ print(subprocess.run('cd /content/llm-exp && git log --oneline -1', shell=True, 
                     continue
                 if done and rel.endswith("resume.pt"):
                     continue
-                rc, out = self.run(["upload", "-s", self.a.session, p, f"{REMOTE}/{rel}"], timeout=3600)
-                if rc:
-                    raise RuntimeError(f"upload failed for {rel}: {out[-300:]}")
+                self.py(f"import os\nos.makedirs(os.path.dirname('{REMOTE}/{rel}'), exist_ok=True)")
+                if not self.scp(p, f":{REMOTE}/{rel}"):
+                    rc, out = self.run(["upload", "-s", self.a.session, p, f"{REMOTE}/{rel}"], timeout=3600)
+                    if rc:
+                        raise RuntimeError(f"upload failed for {rel}: {out[-300:]}")
                 n += 1
         if n:  # the uploaded copies match the mirror: do not download them back
             for rel, sm in self.manifest().items():
@@ -131,7 +148,7 @@ print(json.dumps(m))
         if rel.endswith("model.pt") and "runs/pretrain/done" not in man:
             return False  # written non-atomically mid-pretraining; resume.pt holds the same weights
         if rel.endswith("resume.pt"):
-            if "runs/pretrain/done" in man or time.time() - self.last_resume_dl < 40 * 60:
+            if "runs/pretrain/done" in man or time.time() - self.last_resume_dl < 20 * 60:
                 return False
         if rel.startswith("data/") and size > BIG and "runs/smoke_ok.json" not in man:
             return False  # data files are final once the smoke stage has run
@@ -147,8 +164,10 @@ print(json.dumps(m))
                 continue
             dst = os.path.join(self.mirror, rel)
             os.makedirs(os.path.dirname(dst), exist_ok=True)
-            ok = False
-            if not self.api_broken:
+            ok = self.scp(f":{REMOTE}/{rel}", dst + ".dl")
+            if ok and os.path.getsize(dst + ".dl") != size:
+                continue  # changed while copying: take it next round
+            if not ok and not self.api_broken:
                 rc, out = self.run(["download", "-s", self.a.session, f"{REMOTE}/{rel}", dst + ".dl"], timeout=3600)
                 ok = rc == 0 and "failed" not in out.lower()
                 self.api_broken = not ok and "500" in out

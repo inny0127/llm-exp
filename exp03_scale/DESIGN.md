@@ -144,3 +144,22 @@ Expected wall time is about 9-10 hours:
 | Pretraining | about 2.5 hours |
 | Dev | about 1 hour |
 | Test | about 5 hours, dominated by the 6 sleep runs at about 70 minutes each |
+
+## Amendment after attempt 1 (runtime lost)
+
+Attempt 1 is reported in `results_attempt1/`. Colab reclaimed its runtime after about 5
+hours, before the pretrained weights had been copied off the VM. GPU pretraining is not
+bit-reproducible, so the test cannot continue on that model.
+
+Attempt 2 reuses the data, which does not depend on the model. Everything else is redone on
+the new model, in this order:
+
+1. pretraining, with the same settings and validity check;
+2. the caches;
+3. the cost probe;
+4. all dev runs;
+5. the freeze, by the same rules;
+6. all 15 test runs.
+
+The verdict comes from attempt 2 alone. Copies now go over SSH (about 20 MB/s), so a
+checkpoint reaches the mirror within one 5-minute round.
