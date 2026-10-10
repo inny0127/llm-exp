@@ -116,3 +116,31 @@ stops itself in three cases:
 
 Every launched run is reported, including the probe runs. If the budget stops the test
 early, the verdict is "incomplete" and no partial-seed verdict is drawn.
+
+## Amendment before any run: hardware is a free Colab T4
+
+This amendment was made on 2026-10-10, before any Exp 03 run. The Colab account has no
+compute units and A100 is not available to it, so the experiment runs on the free T4. That
+changes three things and nothing in the science:
+
+- **Precision.** Pretraining uses fp16 with loss scaling, because the T4 has no bf16. On a
+  T4 benchmark of 200 steps, fp16 matched bf16's loss curve (val loss 3.110 vs 3.110) at 2.9x
+  the speed (34K vs 11.6K tokens/s). Memory slot routing stays in fp32, and stream runs are
+  fp32 as before. On Ampere or newer GPUs, `pretrain.py --amp` still picks bf16.
+- **Execution.**
+  - Two runs go in parallel (the T4 VM has 2 CPUs).
+  - The budget rules are inactive, since the free tier has no CU meter.
+  - The run is driven through the Colab CLI by `colab_cli_runner.py`. It mirrors data,
+    checkpoints and finished runs off the VM, and resumes on a fresh runtime when Colab
+    reclaims one. Each stage skips finished work, so a resume changes no result.
+- **Pretraining text.** Only the first 1.7 GB of the 2.2 GB train file is read, to fit the
+  VM's 12 GB of RAM. `data.py` asserts that the 300M-token budget is still met.
+
+Expected wall time is about 9-10 hours:
+
+| Stage | Expected time |
+|---|---|
+| Data | about 20 minutes |
+| Pretraining | about 2.5 hours |
+| Dev | about 1 hour |
+| Test | about 5 hours, dominated by the 6 sleep runs at about 70 minutes each |

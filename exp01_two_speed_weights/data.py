@@ -104,6 +104,7 @@ def main():
     docs = story_ids + bio_ids
     rng.shuffle(docs)
     train = np.concatenate(docs)
+    assert len(train) >= 0.99 * args.pretrain_tokens, "not enough stories read; raise --max_mb"
     val = np.concatenate(encode_docs(tok, val_stories, eot_id))
     train.tofile(os.path.join(args.data_dir, "train.bin"))
     val.tofile(os.path.join(args.data_dir, "val.bin"))

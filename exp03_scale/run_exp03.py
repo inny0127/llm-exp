@@ -204,7 +204,7 @@ def st_data(a, budget):
     # Exp 01's tokenizer: names split into the same syllable pieces at both scales
     shutil.copy(os.path.join(HERE, "tokenizer.json"), os.path.join(a.data, "tokenizer.json"))
     sh([sys.executable, "data.py", "--data_dir", a.data, "--train_file", VALID if a.dry else TRAIN,
-        "--max_mb", "0", "--pretrain_tokens", str(a.pretrain_tokens), "--n_old", str(a.n_old),
+        "--max_mb", "0" if a.dry else str(a.max_mb), "--pretrain_tokens", str(a.pretrain_tokens), "--n_old", str(a.n_old),
         "--bios_per_old", str(a.bios_per_old), "--n_streams", str(1 + len(TEST_SEEDS)),
         "--stream_len", str(a.n_facts)], log=os.path.join(a.runs, "data.log"))
     print(open(os.path.join(a.runs, "data.log")).read()[-1500:], flush=True)
@@ -441,6 +441,8 @@ def main():
     ap.add_argument("--n_facts", type=int, default=2000)
     ap.add_argument("--bg_windows", type=int, default=16, help="16 x 256 tokens = Meta's 4,096-token batches")
     ap.add_argument("--workers", type=int, default=8)
+    ap.add_argument("--max_mb", type=int, default=1700,
+                    help="read this much of the 2.2 GB train file (1.2 GB covers 300M tokens; keeps RAM < 12 GB)")
     ap.add_argument("--budget_cu", type=float, default=60)
     ap.add_argument("--cu_per_hour", type=float, default=13.0, help="read it off Colab's Resources panel")
     ap.add_argument("--dry", action="store_true", help="tiny end-to-end check (CPU ok)")

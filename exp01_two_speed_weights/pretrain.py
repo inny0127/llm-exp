@@ -30,7 +30,9 @@ def main():
     ap.add_argument("--warmup", type=int, default=200)
     ap.add_argument("--threads", type=int, default=4)
     ap.add_argument("--device", default="cpu")
-    ap.add_argument("--amp", action="store_true", help="bf16 autocast (CUDA)")
+    ap.add_argument("--amp", action="store_true", help="mixed precision (CUDA)")
+    ap.add_argument("--amp_dtype", choices=["auto", "bf16", "fp16"], default="auto",
+                    help="auto: bf16 where the GPU has it (Ampere+), else fp16 with loss scaling (T4)")
     ap.add_argument("--eval_every", type=int, default=500)
     ap.add_argument("--max_steps", type=int, default=0, help="0 = one full epoch")
     args = ap.parse_args()
@@ -87,10 +89,20 @@ def main():
     def save(step):
         torch.save({"cfg": dataclasses.asdict(cfg), "model": model.state_dict()},
                    os.path.join(args.out, "model.pt"))
-        torch.save({"model": model.state_dict(), "opt": opt.state_dict(), "step": step}, resume + ".tmp")
+        torch.save({"model": model.state_dict(), "opt": opt.state_dict(), "step": step,
+                    "scaler": scaler.state_dict()}, resume + ".tmp")
         os.replace(resume + ".tmp", resume)
 
-    amp = torch.autocast("cuda", dtype=torch.bfloat16) if args.amp else torch.autocast("cpu", enabled=False)
+    dt = args.amp_dtype
+    if args.amp and dt == "auto":
+        dt = "bf16" if torch.cuda.get_device_capability()[0] >= 8 else "fp16"
+    amp = torch.autocast("cuda", dtype=torch.bfloat16 if dt == "bf16" else torch.float16) if args.amp \
+        else torch.autocast("cpu", enabled=False)
+    scaler = torch.amp.GradScaler("cuda", enabled=args.amp and dt == "fp16")
+    if args.amp:
+        print("mixed precision:", dt, flush=True)
+    if start and ck.get("scaler"):
+        scaler.load_state_dict(ck["scaler"])
     log = open(os.path.join(args.out, "log.jsonl"), "a")
     t0, tl = time.time(), 0.0
     for step in range(start, steps):
@@ -101,9 +113,11 @@ def main():
             g["lr"] = lr_at(step)
         with amp:
             loss = lm_loss(model, w[:, :-1], w[:, 1:])
-        loss.backward()
+        scaler.scale(loss).backward()
+        scaler.unscale_(opt)
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-        opt.step()
+        scaler.step(opt)
+        scaler.update()
         opt.zero_grad(set_to_none=True)
         tl += loss.item()
         if (step + 1) % 50 == 0:
