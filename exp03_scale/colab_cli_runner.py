@@ -145,9 +145,12 @@ print(json.dumps(m))
             dst = os.path.join(self.mirror, rel)
             os.makedirs(os.path.dirname(dst), exist_ok=True)
             rc, out = self.run(["download", "-s", self.a.session, f"{REMOTE}/{rel}", dst + ".tmp"], timeout=3600)
-            if rc:
-                self.log("download failed:", rel, out[-200:])
-                continue
+            if rc or "failed" in out.lower():
+                try:  # the runtime's file API sometimes returns 500: pull it through the kernel instead
+                    self.fetch(rel, size, dst + ".tmp")
+                except Exception as e:  # noqa: BLE001
+                    self.log("download failed:", rel, str(e)[-200:])
+                    continue
             os.replace(dst + ".tmp", dst)
             self.state[rel] = [size, mtime]
             json.dump(self.state, open(self.state_path, "w"))
@@ -155,6 +158,24 @@ print(json.dumps(m))
             if rel.endswith("resume.pt"):
                 self.last_resume_dl = time.time()
         return got, man
+
+    def fetch(self, rel, size, dst, chunk=12 * 2**20):
+        """Copy a remote file in base64 chunks over `colab exec`; checked by size and sha256."""
+        import base64
+        import hashlib
+        h = hashlib.sha256()
+        with open(dst, "wb") as f:
+            for off in range(0, max(size, 1), chunk):
+                b = self.py(f"import base64\nwith open('{REMOTE}/{rel}','rb') as f:\n    f.seek({off})\n"
+                            f"    print(base64.b64encode(f.read({chunk})).decode())", timeout=300)
+                data = base64.b64decode(b)
+                f.write(data)
+                h.update(data)
+        remote = self.py(f"import hashlib\nh=hashlib.sha256()\nwith open('{REMOTE}/{rel}','rb') as f:\n"
+                         f"    [h.update(c) for c in iter(lambda: f.read(1<<24), b'')]\nprint(h.hexdigest())",
+                         timeout=300)
+        if os.path.getsize(dst) != size or remote != h.hexdigest():
+            raise RuntimeError(f"{rel}: size or checksum mismatch (changed while copying?)")
 
     def tail(self, n=1200):
         return self.py(f"import os\np='{REMOTE}/driver.log'\nprint(open(p).read()[-{n}:] if os.path.exists(p) else '')")
