@@ -1,5 +1,9 @@
 # Exp 01 — Two-speed weights: sparse fast writes + sleep consolidation
 
+> Added after the dev stream: the protocol changes made there, before any
+> test run, are listed with their evidence in `RESULTS.md` (Deviations). The
+> text below is the pre-registration as committed.
+
 Pre-registered design. Written before any stream run; hyperparameters marked
 *dev-selected* are chosen on the dev stream (seed 0) and frozen before the test
 streams (seeds 1+) are run.
