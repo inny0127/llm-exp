@@ -82,7 +82,7 @@ print(subprocess.run('cd /content/llm-exp && git log --oneline -1', shell=True, 
             for f in files:
                 p = os.path.join(root, f)
                 rel = os.path.relpath(p, self.mirror)
-                if rel.startswith(".") or rel == "orchestrator.log" or "/logs/" in rel or rel.endswith(".log"):
+                if rel.startswith(".") or rel in ("orchestrator.log", "runner.out") or "/logs/" in rel or rel.endswith(".log"):
                     continue
                 if done and rel.endswith("resume.pt"):
                     continue

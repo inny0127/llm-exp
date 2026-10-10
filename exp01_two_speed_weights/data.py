@@ -17,12 +17,25 @@ EOT = "<|endoftext|>"
 
 
 def read_stories(path, max_bytes=None):
+    """Stories (EOT-separated) from the first max_bytes characters, streamed line by line: one
+    non-ASCII character would make a single 1.7 GB string take 2-4 bytes per character."""
+    stories, buf, pos = [], [], 0
     with open(path, encoding="utf-8", errors="replace") as f:
-        text = f.read(max_bytes) if max_bytes else f.read()
-    stories = [s.strip() for s in text.split(EOT)]
-    if max_bytes:
-        stories = stories[:-1]  # last one may be cut mid-story
-    return [s for s in stories if s]
+        for line in f:
+            cut = bool(max_bytes) and pos + len(line) >= max_bytes
+            if cut:
+                line = line[:max_bytes - pos]
+            pos += len(line)
+            parts = line.split(EOT)
+            buf.append(parts[0])
+            for p in parts[1:]:
+                stories.append("".join(buf).strip())
+                buf = [p]
+            if cut:
+                break
+    if not max_bytes:
+        stories.append("".join(buf).strip())  # the text after the last EOT
+    return [s for s in stories if s]  # with max_bytes the trailing piece may be cut: dropped
 
 
 def train_tokenizer(texts, vocab_size):
