@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Reproduce Exp 01 end to end on CPU (about 6 hours on 4 cores; see README for a GPU note).
+# Reproduce Exp 01 end to end on CPU (about 5 hours on 4 cores).
 set -euo pipefail
 cd "$(dirname "$0")"
 PY=${PY:-python}
@@ -13,6 +13,6 @@ HF=https://huggingface.co/datasets/roneneldan/TinyStories/resolve/main
 [ -f runs/pretrain/model.pt ] || $PY pretrain.py --out runs/pretrain
 
 # IDF background (shared by every sparse run), then the frozen test grid.
-$PY -c "import stream, torch, os; m = stream.load_model('runs/pretrain/model.pt'); m.eval(); stream.background_df(m, 'data/train.bin', 1000, 3, 'runs/pretrain/bg_df.pt')"
-$PY sweep.py --seeds 1 2 --workers 4
-$PY analyze.py --runs runs/stream --seeds 1 2 --out results
+$PY -c "import stream, torch, os; m = stream.load_model('runs/pretrain/model.pt'); m.eval(); stream.background_df(m, 'data/train.bin', 1000, 32, 'runs/pretrain/bg_df_w32.pt')"
+$PY sweep.py --seeds 1 2 3 --workers 4
+$PY analyze.py --runs runs/stream --seeds 1 2 3 --out results

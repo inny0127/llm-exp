@@ -3,6 +3,7 @@
 Usage: python sweep.py --seeds 1 2 --workers 4 [--arms A A+sleep B C C+sleep] [-- extra stream.py args]
 """
 import argparse
+import json
 import os
 import subprocess
 import sys
@@ -10,9 +11,9 @@ from concurrent.futures import ThreadPoolExecutor
 
 # Frozen after the dev-stream calibration (see DESIGN.md / RESULTS.md).
 GRIDS = {
-    "A": [1e-5, 3e-5, 1e-4, 3e-4],
-    "B": [1e-4, 3e-4, 1e-3, 3e-3],
-    "C": [1.0, 4.0, 16.0, 64.0],
+    "A": [1e-5, 3e-5, 1e-4],
+    "B": [3e-5, 1e-4, 3e-4],
+    "C": [16.0, 64.0, 256.0],
 }
 
 
@@ -23,6 +24,7 @@ def main():
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--out", default="runs/stream")
     ap.add_argument("--lrs", type=float, nargs="*", help="override the frozen grid")
+    ap.add_argument("--grid", type=json.loads, help='per-arm override, e.g. {"A": [1e-4]}')
     args, extra = ap.parse_known_args()
     extra = [a for a in extra if a != "--"]
     os.makedirs(os.path.join(args.out, "logs"), exist_ok=True)
@@ -30,7 +32,7 @@ def main():
     jobs = []
     for arm in args.arms:
         base, sleep = arm.split("+")[0], arm.endswith("+sleep")
-        for lr in args.lrs or GRIDS[base]:
+        for lr in args.lrs or (args.grid or GRIDS)[base]:
             for seed in args.seeds:
                 name = f"{arm}_lr{lr:g}_s{seed}"
                 if os.path.exists(os.path.join(args.out, name + ".json")):

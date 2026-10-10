@@ -97,34 +97,39 @@ class SparseWriter:
         score = counts / counts.sum() * self.idf
         return score.topk(self.t).indices
 
-    def write(self, x, y, mask, steps):
+    def write(self, x, y, mask, steps, done=None):
         sel = self.select(x, mask)
         overlap = float(self.ever[sel].float().mean())
         v = self.model.mem.values
-        for _ in range(steps):
+        for n in range(1, steps + 1):
             lm_loss(self.model, x, y, mask).backward()
             with torch.no_grad():
                 v[sel] -= self.lr * v.grad[sel]
             v.grad = None
+            if done is not None and done():
+                break
         self.written[sel] = True
         self.ever[sel] = True
-        return {"overlap": overlap}
+        return {"overlap": overlap, "steps": n}
 
 
 class AdamWriter:
     """Arms A (all parameters) and B (LoRA parameters only)."""
 
-    def __init__(self, model, params, lr):
+    def __init__(self, model, params, lr, beta1=0.9):
         self.model, self.params = model, params
-        self.opt = torch.optim.AdamW(params, lr=lr, betas=(0.9, 0.999), weight_decay=0.0)
+        self.opt = torch.optim.AdamW(params, lr=lr, betas=(beta1, 0.999), weight_decay=0.0,
+                                     fused=True)
 
-    def write(self, x, y, mask, steps):
-        for _ in range(steps):
+    def write(self, x, y, mask, steps, done=None):
+        for n in range(1, steps + 1):
             lm_loss(self.model, x, y, mask).backward()
             torch.nn.utils.clip_grad_norm_(self.params, 1.0)
             self.opt.step()
             self.opt.zero_grad(set_to_none=True)
-        return {}
+            if done is not None and done():
+                break
+        return {"steps": n}
 
 
 def sleep(model, args, cues, n_recent, stream_probe, writer, pretrained_values, replay, rng):
@@ -150,7 +155,8 @@ def sleep(model, args, cues, n_recent, stream_probe, writer, pretrained_values, 
         p.requires_grad_(False)
     for p in dense:
         p.requires_grad_(True)
-    opt = torch.optim.AdamW(dense, lr=args.sleep_lr, betas=(0.9, 0.999), weight_decay=0.0)
+    opt = torch.optim.AdamW(dense, lr=args.sleep_lr, betas=(0.9, 0.999), weight_decay=0.0,
+                            fused=True)
     model.train()
     steps = 0
     for _ in range(args.sleep_epochs):
@@ -171,15 +177,15 @@ def sleep(model, args, cues, n_recent, stream_probe, writer, pretrained_values, 
 
 
 @torch.no_grad()
-def checkpoint(model, n_seen, probes, vx, vy):
+def checkpoint(model, n_seen, probes, vx, vy, n_probe=None):
+    """Forgetting metrics plus recall of the first n_probe stream facts (default: those seen)."""
     model.eval()
     rec = {"n_seen": n_seen, "val_loss": evals.lm_eval(model, vx, vy)}
     for k in ("old_in", "old_out"):
         rec[k] = float(probes[k].run(model)[0].mean())
-    if n_seen:
-        idx = list(range(n_seen))
-        rec["ret_in"] = probes["stream_in"].run(model, idx)[0].tolist()
-        rec["ret_out"] = probes["stream_out"].run(model, idx)[0].tolist()
+    idx = list(range(n_seen if n_probe is None else n_probe))
+    rec["ret_in"] = probes["stream_in"].run(model, idx)[0].tolist()
+    rec["ret_out"] = probes["stream_out"].run(model, idx)[0].tolist()
     model.train()
     return rec
 
@@ -190,18 +196,25 @@ def main():
     ap.add_argument("--lr", type=float, required=True)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--sleep", action="store_true")
-    ap.add_argument("--n_facts", type=int, default=1000)
-    ap.add_argument("--steps", type=int, default=2, help="gradient steps per fact")
+    ap.add_argument("--n_facts", type=int, default=500)
+    ap.add_argument("--steps", type=int, default=20,
+                    help="max gradient steps per fact; each fact trains until its probe is right")
+    ap.add_argument("--fixed_steps", action="store_true",
+                    help="always take --steps steps (the pre-registered protocol)")
+    ap.add_argument("--beta1", type=float, default=0.0,
+                    help="Adam beta1 for arms A and B; momentum across unrelated facts hurts")
+    ap.add_argument("--bg_windows", type=int, default=32,
+                    help="128-token windows per IDF background batch (32 = Meta's 64x64 shape)")
     ap.add_argument("--batch", type=int, default=16, help="paraphrases per fact")
     ap.add_argument("--t", type=int, default=128, help="slots written per fact (arm C)")
     ap.add_argument("--lora_r", type=int, default=16)
     ap.add_argument("--sleep_every", type=int, default=100)
-    ap.add_argument("--sleep_lr", type=float, default=3e-4)
-    ap.add_argument("--sleep_epochs", type=int, default=1)
+    ap.add_argument("--sleep_lr", type=float, default=1e-4)
+    ap.add_argument("--sleep_epochs", type=int, default=3)
     ap.add_argument("--sleep_p_recent", type=int, default=7)
     ap.add_argument("--sleep_p_old", type=int, default=2)
     ap.add_argument("--sleep_batch", type=int, default=32)
-    ap.add_argument("--sleep_replay", type=int, default=4, help="pretraining windows per step")
+    ap.add_argument("--sleep_replay", type=int, default=16, help="pretraining windows per step")
     ap.add_argument("--ckpt_every", type=int, default=250)
     ap.add_argument("--data_dir", default="data")
     ap.add_argument("--pretrained", default="runs/pretrain/model.pt")
@@ -235,24 +248,32 @@ def main():
 
     if args.arm == "C":
         model.eval()  # no dropout anywhere; eval() only matters for record hooks
-        df = background_df(model, os.path.join(args.data_dir, "train.bin"), 1000, 3,
-                           os.path.join(os.path.dirname(args.pretrained), "bg_df.pt"))
+        df = background_df(model, os.path.join(args.data_dir, "train.bin"), 1000, args.bg_windows,
+                           os.path.join(os.path.dirname(args.pretrained),
+                                        f"bg_df_w{args.bg_windows}.pt"))
         idf = torch.log((1000 + 1) / (df + 1))
         writer = SparseWriter(model, args.lr, args.t, idf)
     elif args.arm == "B":
         for p in model.parameters():
             p.requires_grad_(False)
-        writer = AdamWriter(model, add_lora(model, args.lora_r, 2 * args.lora_r), args.lr)
+        writer = AdamWriter(model, add_lora(model, args.lora_r, 2 * args.lora_r), args.lr,
+                            args.beta1)
     else:
-        writer = AdamWriter(model, list(model.parameters()), args.lr)
+        writer = AdamWriter(model, list(model.parameters()), args.lr, args.beta1)
 
     t0 = time.time()
-    ckpts = [checkpoint(model, 0, probes, vx, vy)]
-    acq_in, acq_out, acq_logp, overlaps, sleeps = [], [], [], [], []
+    ckpts = [checkpoint(model, 0, probes, vx, vy, n_probe=len(stream))]  # baseline
+    acq_in, acq_out, acq_logp, overlaps, sleeps, write_steps = [], [], [], [], [], []
     model.train()
     for i, fact in enumerate(stream):
         x, y, m = encode(tok, facts.paraphrase_batch(fact, args.batch, rng))
-        info = writer.write(x, y, m, args.steps)
+        done = None
+        if not args.fixed_steps:
+            def done(i=i):
+                with torch.no_grad():
+                    return bool(probes["stream_in"].run(model, [i])[0][0])
+        info = writer.write(x, y, m, args.steps, done)
+        write_steps.append(info["steps"])
         if "overlap" in info:
             overlaps.append(info["overlap"])
         with torch.no_grad():
@@ -285,7 +306,8 @@ def main():
 
     res = {"name": name, "args": {k: v for k, v in vars(args).items() if k not in ("tok", "stream")},
            "acq_in": acq_in, "acq_out": acq_out, "acq_logp_in": acq_logp,
-           "slot_overlap": overlaps, "checkpoints": ckpts, "sleeps": sleeps,
+           "slot_overlap": overlaps, "write_steps": write_steps, "checkpoints": ckpts,
+           "sleeps": sleeps,
            "seconds": time.time() - t0}
     with open(out_path, "w") as f:
         json.dump(res, f)

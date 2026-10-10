@@ -47,6 +47,11 @@ def run_metrics(r):
         "self_label_acc": float(np.mean([s["self_label_acc"] for s in sl])) if sl else None,
         "sleep_pre": [s["pre_recent"] for s in sl], "sleep_post": [s["post_recent"] for s in sl],
         "seconds": r["seconds"], "old0": c0["old_in"], "nll0": c0["val_loss"],
+        "acq0": float(np.mean(c0["ret_in"])) if c0.get("ret_in") else 0.0,
+        "steps": float(np.mean(r["write_steps"])) if r.get("write_steps") else None,
+        "steps_bins": binned(r["write_steps"], nb) if r.get("write_steps") else None,
+        "cap_frac": (float(np.mean(np.asarray(r["write_steps"]) >= r["args"]["steps"]))
+                     if r.get("write_steps") and not r["args"].get("fixed_steps") else None),
     }
 
 
@@ -83,12 +88,34 @@ def operating_point(agg, arm):
     return max(ok, key=lambda t: t[1]["ret_in"]) if ok else None
 
 
-def at_acquisition(agg, arm, level):
-    pts = sorted((m["acq_in"], m["old_drop"], m["d_nll"]) for _, m in frontier(agg, arm))
-    acq = np.array([p[0] for p in pts])
-    if level < acq.min() - 1e-9 or level > acq.max() + 1e-9:
+def least_forgetting(agg, arm, min_acq=0.9):
+    """Lowest old-fact drop among LRs that learn (acquisition >= min_acq)."""
+    pts = frontier(agg, arm)
+    ok = [(lr, m) for lr, m in pts if m["acq_in"] >= min_acq] or [max(pts, key=lambda t: t[1]["acq_in"])]
+    return min(ok, key=lambda t: t[1]["old_drop"])
+
+
+def budget_curve(agg, arm, budgets=(5, 10, 20, 40, 80)):
+    """Post hoc: best retention among LRs whose old-fact drop is within each budget."""
+    pts = frontier(agg, arm)
+    return {b: max([m["ret_in"] for _, m in pts if m["old_drop"] <= b], default=None) for b in budgets}
+
+
+def chosen(agg, ops, arm):
+    """Operating point if one is within budget, else the least-forgetting LR that learns."""
+    if not frontier(agg, arm):
         return None
-    return float(np.interp(level, acq, [p[1] for p in pts])), float(np.interp(level, acq, [p[2] for p in pts]))
+    return ops.get(arm) or least_forgetting(agg, arm)
+
+
+def sleep_effect(agg, base):
+    """Paired by LR: (base+sleep) minus base, on the metrics that decide Q2."""
+    out = {}
+    for lr, m in frontier(agg, base):
+        s = agg.get((base + "+sleep", lr))
+        if s:
+            out[lr] = {k: s[k] - m[k] for k in ("ret_in", "ret_out", "ret_early", "old_drop", "d_nll")}
+    return out
 
 
 def decide(agg):
@@ -98,23 +125,31 @@ def decide(agg):
         "acq_in", "acq_out", "ret_in", "ret_out", "ret_early", "d_nll", "old_drop")}})
         for a, op in ops.items()}
     if frontier(agg, "A") and frontier(agg, "C"):
-        level = min(max(m["acq_in"] for _, m in frontier(agg, "A")),
-                    max(m["acq_in"] for _, m in frontier(agg, "C")), 0.9)
-        q1 = {"matched_acquisition": level}
+        # Facts train to criterion, so acquisition is ~1 at every LR that does not hit the
+        # step cap; "forgetting at matched acquisition" = least forgetting among LRs that learn.
+        q1 = {"rule": "least old-fact drop among LRs with acquisition >= 0.9"}
         for arm in ("A", "B", "C"):
             if frontier(agg, arm):
-                v = at_acquisition(agg, arm, level)
-                q1[arm] = None if v is None else {"old_drop": v[0], "d_nll": v[1]}
-        if q1["A"] and q1["C"]:
-            q1["pass"] = (q1["C"]["old_drop"] <= 0.5 * q1["A"]["old_drop"]
+                lr, m = least_forgetting(agg, arm)
+                # Relative drop is the form of Meta's headline (NQ F1 -89% / -71% / -11%).
+                q1[arm] = {"lr": lr, "acq_in": m["acq_in"], "ret_in": m["ret_in"],
+                           "old_drop": m["old_drop"], "d_nll": m["d_nll"],
+                           "old_drop_rel_pct": m["old_drop"] / m["old0"]}
+        q1["pass"] = bool(q1["C"]["old_drop"] <= 0.5 * q1["A"]["old_drop"]
                           and q1["C"]["d_nll"] <= 0.5 * q1["A"]["d_nll"])
         d["Q1"] = q1
-    if ops.get("C"):
-        m = ops["C"][1]
+    d["post_hoc_retention_within_old_drop_budget"] = {a: budget_curve(agg, a) for a in ARMS
+                                                      if frontier(agg, a)}
+    d["sleep_effect_paired_by_lr"] = {b: sleep_effect(agg, b) for b in ("A", "C")}
+    if chosen(agg, ops, "C"):
+        m = chosen(agg, ops, "C")[1]
         d["saturation"] = {"early_gap": m["acq_in"] - m["ret_early"],
                            "acq_first_minus_last_bin": float(m["acq_bins"][0] - m["acq_bins"][-1])}
         d["saturation"]["present"] = bool(d["saturation"]["early_gap"] >= 0.15
                                           or d["saturation"]["acq_first_minus_last_bin"] >= 0.10)
+        d["saturation"]["evaluated_at"] = "operating point" if ops.get("C") else "least-forgetting LR"
+        d["saturation"]["slot_overlap_by_bin"] = m["overlap_bins"]
+        d["saturation"]["steps_by_bin"] = m["steps_bins"]
     if ops.get("C") and ops.get("C+sleep") and ops.get("A+sleep"):
         c, dd, asl = ops["C"][1], ops["C+sleep"][1], ops["A+sleep"][1]
         d["Q2"] = {"D_minus_C_ret": dd["ret_in"] - c["ret_in"],
@@ -158,10 +193,9 @@ def plot_frontier(agg, ops, path):
             hollow = arm.endswith("+sleep")
             ax.scatter(xs, ys, s=64, zorder=3, facecolor=SURF if hollow else COLOR[arm],
                        edgecolor=COLOR[arm] if hollow else SURF, linewidth=2)
-            if ops.get(arm):
-                lr, m = ops[arm]
-                ax.annotate(LABEL[arm], (m[key], m["ret_in"]), xytext=(6, 6),
-                            textcoords="offset points", fontsize=8.5, color=INK2)
+            lr, m = max(pts, key=lambda t: t[1]["ret_in"])
+            ax.annotate(LABEL[arm], (m[key], m["ret_in"]), xytext=(6, 4),
+                        textcoords="offset points", fontsize=8.5, color=INK2)
         ax.set_xlabel(xlabel, color=INK2, fontsize=10)
         lo = min(0, min(m[key] for (_, _), m in agg.items()))
         hi = max(m[key] for (_, _), m in agg.items())
@@ -176,15 +210,15 @@ def plot_frontier(agg, ops, path):
     plt.close(fig)
 
 
-def plot_position(ops, path):
+def plot_position(agg, ops, path):
     fig, axes = plt.subplots(1, 2, figsize=(11, 4.4), sharey=True, facecolor=SURF)
     for ax, key, title in [(axes[0], "acq_bins", "Acquisition: right after each write"),
                            (axes[1], "ret_bins", "Retention: at end of stream")]:
         style(ax)
         for arm in ARMS:
-            if not ops.get(arm):
+            if not chosen(agg, ops, arm):
                 continue
-            lr, m = ops[arm]
+            lr, m = chosen(agg, ops, arm)
             y = m[key]
             x = (np.arange(len(y)) + 0.5) * 100
             ax.plot(x, y, DASH[arm], color=COLOR[arm], linewidth=2, label=f"{LABEL[arm]} (lr {lr:g})")
@@ -194,7 +228,7 @@ def plot_position(ops, path):
     axes[0].set_ylabel("Probe accuracy (chance about 0.07)", color=INK2, fontsize=10)
     axes[0].set_ylim(0, 1)
     axes[1].legend(frameon=False, fontsize=9, labelcolor=INK2, loc="upper left")
-    fig.suptitle("Each arm at its operating point (best retention within the forgetting budget)",
+    fig.suptitle("Each arm at its operating point, or its least-forgetting LR if none is within budget",
                  color=INK, fontsize=11.5, x=0.01, ha="left")
     fig.tight_layout()
     fig.savefig(path, dpi=150, facecolor=SURF)
@@ -206,9 +240,9 @@ def plot_sleep(agg, ops, path):
     ax = axes[0]
     style(ax)
     for arm in ("A+sleep", "C+sleep"):
-        if not ops.get(arm):
+        if not chosen(agg, ops, arm):
             continue
-        lr, m = ops[arm]
+        lr, m = chosen(agg, ops, arm)
         x = (np.arange(len(m["sleep_pre"])) + 1) * 100
         ax.plot(x, m["sleep_pre"], "-", color=COLOR[arm], linewidth=2, label=f"{LABEL[arm]}: before sleep")
         ax.plot(x, m["sleep_post"], "--", color=COLOR[arm], linewidth=2, label=f"{LABEL[arm]}: after sleep")
@@ -220,9 +254,9 @@ def plot_sleep(agg, ops, path):
     ax = axes[1]
     style(ax)
     for arm in ("C", "C+sleep"):
-        if not ops.get(arm) or ops[arm][1]["overlap_bins"] is None:
+        if not chosen(agg, ops, arm) or chosen(agg, ops, arm)[1]["overlap_bins"] is None:
             continue
-        lr, m = ops[arm]
+        lr, m = chosen(agg, ops, arm)
         y = m["overlap_bins"]
         ax.plot((np.arange(len(y)) + 0.5) * 100, y, DASH[arm], color=COLOR[arm], linewidth=2,
                 label=LABEL[arm])
@@ -238,15 +272,19 @@ def plot_sleep(agg, ops, path):
 
 def table(agg, ops):
     rows = ["| Arm | LR | Acquisition | Retention (all) | Retention (first 100) | Retention, held-out template"
-            " | Old-fact drop (pts) | Delta NLL | Op. point |",
-            "|---|---|---|---|---|---|---|---|---|"]
+            " | Old-fact drop (pts) | Delta NLL | Steps/fact | Op. point |",
+            "|---|---|---|---|---|---|---|---|---|---|"]
     for arm in ARMS:
         for lr, m in frontier(agg, arm):
             op = "yes" if ops.get(arm) and ops[arm][0] == lr else ""
             rows.append(f"| {LABEL[arm]} | {lr:g} | {m['acq_in']:.2f} | {m['ret_in']:.2f} ± {m['ret_in_sd']:.2f}"
                         f" | {m['ret_early']:.2f} | {m['ret_out']:.2f} | {m['old_drop']:.1f} ± {m['old_drop_sd']:.1f}"
-                        f" | {m['d_nll']:+.3f} | {op} |")
+                        f" | {m['d_nll']:+.3f} | {m['steps'] or float('nan'):.1f} | {op} |")
     return "\n".join(rows)
+
+
+def _jsonable(o):
+    return o.tolist() if hasattr(o, "tolist") else float(o)
 
 
 def main():
@@ -260,15 +298,15 @@ def main():
     dec, ops = decide(agg)
     tag = "seeds" + "-".join(map(str, args.seeds))
     plot_frontier(agg, ops, os.path.join(args.out, f"frontier_{tag}.png"))
-    plot_position(ops, os.path.join(args.out, f"position_{tag}.png"))
+    plot_position(agg, ops, os.path.join(args.out, f"position_{tag}.png"))
     plot_sleep(agg, ops, os.path.join(args.out, f"sleep_{tag}.png"))
     md = table(agg, ops)
     with open(os.path.join(args.out, f"table_{tag}.md"), "w") as f:
         f.write(md + "\n")
     with open(os.path.join(args.out, f"decision_{tag}.json"), "w") as f:
-        json.dump(dec, f, indent=2, default=float)
+        json.dump(dec, f, indent=2, default=_jsonable)
     print(md)
-    print(json.dumps(dec, indent=2, default=float))
+    print(json.dumps(dec, indent=2, default=_jsonable))
 
 
 if __name__ == "__main__":
