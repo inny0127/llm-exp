@@ -1,0 +1,4 @@
+__pycache__/
+*.pyc
+exp01_two_speed_weights/data/
+exp01_two_speed_weights/runs/
