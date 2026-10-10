@@ -11,6 +11,7 @@ import json
 import math
 import os
 import random
+import re
 import time
 
 import numpy as np
@@ -45,18 +46,119 @@ def encode(tok, texts):
     return x, y, mask
 
 
+def loss_mask(tok, texts, names, values, y, mask, kind):
+    """Which target positions a write trains on: all, all but entity-name tokens, or the answer.
+
+    Targets y[:, j] are the text's tokens j (then the closing EOT), so token offsets index them.
+    """
+    if kind == "all":
+        return mask
+    if kind == "answer":
+        vid = torch.tensor([tok.encode(" " + v).ids[0] for v in values])
+        return mask & (y == vid[:, None])
+    assert kind == "noname", kind
+    out = mask.clone()
+    for i, (text, name) in enumerate(zip(texts, names)):
+        spans, s = [], text.find(name)
+        while s != -1:
+            spans.append((s, s + len(name)))
+            s = text.find(name, s + 1)
+        for j, (a, b) in enumerate(tok.encode(text).offsets):
+            if any(a < e and b > s0 for s0, e in spans):
+                out[i, j] = False
+    return out
+
+
 class Replay:
     """Random pretraining windows (for sleep replay and the IDF background)."""
 
-    def __init__(self, path, ctx, seed):
+    def __init__(self, path, ctx, seed, reject=None):
         self.data = np.memmap(path, dtype=np.uint16, mode="r")
         self.ctx = ctx
         self.rng = np.random.default_rng(seed)
+        self.reject = reject  # optional predicate on a window's start index
+        self.rejected = 0
 
     def sample(self, n):
-        s = self.rng.integers(0, len(self.data) - self.ctx - 1, size=n)
-        w = torch.from_numpy(np.stack([self.data[i:i + self.ctx + 1].astype(np.int64) for i in s]))
+        rows = []
+        while len(rows) < n:
+            for i in self.rng.integers(0, len(self.data) - self.ctx - 1, size=n - len(rows)):
+                if self.reject is not None and self.reject(i):
+                    self.rejected += 1
+                    continue
+                rows.append(self.data[i:i + self.ctx + 1].astype(np.int64))
+        w = torch.from_numpy(np.stack(rows))
         return w[:, :-1], w[:, 1:]
+
+
+def eval_doc_mask(train_bin, tok, names, cache):
+    """Boolean mask over train.bin tokens: True inside any document (EOT-delimited bio or story)
+    that mentions one of these names. Rejecting windows that overlap it also catches windows
+    that start or end mid-name, which a regex on the window text misses."""
+    if os.path.exists(cache):
+        return np.load(cache)
+    data = np.fromfile(train_bin, dtype=np.uint16)
+    eot = tok.token_to_id(EOT)
+    ends = np.flatnonzero(data == eot)
+    starts = np.concatenate([[0], ends[:-1] + 1])
+    pat = re.compile("|".join(r"\s+".join(map(re.escape, n.split())) for n in names))
+    mask = np.zeros(len(data), dtype=bool)
+    for i in range(0, len(starts), 20000):
+        docs = [data[a:b].tolist() for a, b in zip(starts[i:i + 20000], ends[i:i + 20000])]
+        for (a, b), text in zip(zip(starts[i:i + 20000], ends[i:i + 20000]), tok.decode_batch(docs)):
+            if pat.search(text):
+                mask[a:b + 1] = True
+    np.save(cache, mask)
+    return mask
+
+
+def touches_mask(mask, ctx):
+    """Predicate on a window start index: does [i, i + ctx] touch the mask?"""
+    csum = np.concatenate([[0], np.cumsum(mask, dtype=np.int64)])
+    return lambda i: csum[i + ctx + 1] - csum[i] > 0
+
+
+@torch.no_grad()
+def protected_counts(model, tok, pool, cache, tids=range(8)):
+    """Slot reads by the frozen pretrained model on cloze prompts of non-eval old entities
+    (the given templates, every real position). Used to down-weight shared slots."""
+    if os.path.exists(cache):
+        return torch.load(cache)
+    P = torch.zeros(model.mem.n_slots)
+    items = [(e["name"], r, e["attrs"][r]) for e in pool for r in facts.REL_NAMES]
+    model.mem.record = True
+    for t in tids:
+        p = evals.Probe(tok, items, t)
+        for i in range(0, len(p.x), 512):
+            x, lens = p.x[i:i + 512], p.lens[i:i + 512]
+            model(x[:, :int(lens.max())])
+            valid = torch.arange(int(lens.max()))[None, :] < lens[:, None]
+            P += torch.bincount(model.mem.last_idx[valid].reshape(-1), minlength=model.mem.n_slots)
+    model.mem.record = False
+    torch.save(P, cache)
+    return P
+
+
+def fisher_diag(model, params, replay, n_windows):
+    """Empirical-free diagonal Fisher (labels sampled from the model), normalised to mean 1."""
+    F = [torch.zeros_like(p) for p in params]
+    saved = {id(p): p.requires_grad for p in model.parameters()}
+    for p in model.parameters():
+        p.requires_grad_(False)
+    for p in params:
+        p.requires_grad_(True)
+    for _ in range(n_windows):
+        x, _ = replay.sample(1)
+        logits = model(x)
+        yhat = torch.distributions.Categorical(logits=logits.detach()).sample()
+        torch.nn.functional.cross_entropy(logits.view(-1, logits.size(-1)), yhat.view(-1)).backward()
+        for f, p in zip(F, params):
+            f += p.grad.detach() ** 2 / n_windows
+            p.grad = None
+    for p in model.parameters():
+        p.requires_grad_(saved[id(p)])
+    mean = torch.cat([f.flatten() for f in F]).mean()
+    return [f / mean for f in F]
 
 
 @torch.no_grad()
@@ -79,8 +181,10 @@ def background_df(model, train_bin, n_batches, windows_per_batch, cache):
 class SparseWriter:
     """Arm C: SGD on the values of the top-t TF-IDF slots of each fact batch."""
 
-    def __init__(self, model, lr, t, idf):
-        self.model, self.lr, self.t, self.idf = model, lr, t, idf
+    def __init__(self, model, lr, t, idf, protect=None):
+        self.model, self.lr, self.t = model, lr, t
+        # Soft protection divides by (1 + gamma * P); P = 0 reproduces Exp 01 exactly.
+        self.idf = idf if protect is None else idf / (1 + protect)
         for p in model.parameters():
             p.requires_grad_(False)
         model.mem.values.requires_grad_(True)
@@ -97,12 +201,12 @@ class SparseWriter:
         score = counts / counts.sum() * self.idf
         return score.topk(self.t).indices
 
-    def write(self, x, y, mask, steps, done=None):
+    def write(self, x, y, mask, steps, done=None, lmask=None):
         sel = self.select(x, mask)
         overlap = float(self.ever[sel].float().mean())
         v = self.model.mem.values
         for n in range(1, steps + 1):
-            lm_loss(self.model, x, y, mask).backward()
+            lm_loss(self.model, x, y, mask if lmask is None else lmask).backward()
             with torch.no_grad():
                 v[sel] -= self.lr * v.grad[sel]
             v.grad = None
@@ -121,9 +225,9 @@ class AdamWriter:
         self.opt = torch.optim.AdamW(params, lr=lr, betas=(beta1, 0.999), weight_decay=0.0,
                                      fused=True)
 
-    def write(self, x, y, mask, steps, done=None):
+    def write(self, x, y, mask, steps, done=None, lmask=None):
         for n in range(1, steps + 1):
-            lm_loss(self.model, x, y, mask).backward()
+            lm_loss(self.model, x, y, mask if lmask is None else lmask).backward()
             torch.nn.utils.clip_grad_norm_(self.params, 1.0)
             self.opt.step()
             self.opt.zero_grad(set_to_none=True)
@@ -132,24 +236,36 @@ class AdamWriter:
         return {"steps": n}
 
 
-def sleep(model, args, cues, n_recent, stream_probe, writer, pretrained_values, replay, rng):
+def sleep(model, args, cues, n_recent, stream_probe, writer, pretrained_values, replay, rng,
+          old_probe=None, ewc=None, rrng=None):
     """Self-quiz on every cue, reset written slots (sparse arm), distil into dense weights."""
     model.eval()
     _, _, pred = stream_probe.run(model, idx=list(range(len(cues))))
     labels = [facts.RELATIONS[r][int(p)] for (_, r), p in zip(cues, pred)]
+    diag = {}
+    if old_probe is not None:
+        diag["old_before"] = float(old_probe.run(model)[0].mean())
     if isinstance(writer, SparseWriter):
         w = writer.written
         with torch.no_grad():
             model.mem.values[w] = pretrained_values[w]
         writer.written.zero_()
-    sents = []
+    if old_probe is not None:
+        diag["old_after_reset"] = float(old_probe.run(model)[0].mean())
+    sents = []  # (text, name, value)
     for i, ((name, rel), val) in enumerate(zip(cues, labels)):
         k = args.sleep_p_recent if i >= len(cues) - n_recent else args.sleep_p_old
         tids = rng.sample(facts.STREAM_TEMPLATES, k) if k <= len(facts.STREAM_TEMPLATES) \
             else [rng.choice(facts.STREAM_TEMPLATES) for _ in range(k)]
-        sents += [facts.render(rel, t, name, val) for t in tids]
+        sents += [(facts.render(rel, t, name, val), name, val) for t in tids]
     rng.shuffle(sents)
     dense = model.dense_parameters()
+    if args.sleep_freeze != "none":  # keep embeddings (tied with the output head) fixed
+        frozen = {id(model.tok.weight), id(model.pos.weight)}
+        if args.sleep_freeze == "lower":
+            for b in model.blocks[:model.cfg.mem_layer]:
+                frozen |= {id(p) for p in b.parameters()}
+        dense = [p for p in dense if id(p) not in frozen]
     saved = {id(p): p.requires_grad for p in model.parameters()}
     for p in model.parameters():
         p.requires_grad_(False)
@@ -161,9 +277,22 @@ def sleep(model, args, cues, n_recent, stream_probe, writer, pretrained_values, 
     steps = 0
     for _ in range(args.sleep_epochs):
         for i in range(0, len(sents), args.sleep_batch):
-            x, y, m = encode(args.tok, sents[i:i + args.sleep_batch])
+            batch = sents[i:i + args.sleep_batch]
+            # Rehearsal: old entities the model already knows, never the probed (eval) ones.
+            # Own RNG, so the fact sentences match a sleep without rehearsal draw for draw.
+            for name, rel, val in (rrng.sample(args.rehearse_pool, args.sleep_rehearse)
+                                   if args.sleep_rehearse else []):
+                t = rrng.choice(args.rehearse_tids)
+                batch.append((facts.render(rel, t, name, val), name, val))
+            texts, names, vals = zip(*batch)
+            x, y, m = encode(args.tok, list(texts))
+            m = loss_mask(args.tok, texts, names, vals, y, m, args.sleep_fact_loss)
             rx, ry = replay.sample(args.sleep_replay)
             loss = lm_loss(model, x, y, m) + lm_loss(model, rx, ry)
+            if ewc is not None:  # 0.5 * lambda * sum F (theta - theta_pretrained)^2
+                F, theta0, ids = ewc
+                loss = loss + 0.5 * args.sleep_ewc * sum(
+                    (F[k] * (p - theta0[k]) ** 2).sum() for k, p in enumerate(ids) if p.requires_grad)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(dense, 1.0)
             opt.step()
@@ -171,9 +300,12 @@ def sleep(model, args, cues, n_recent, stream_probe, writer, pretrained_values, 
             steps += 1
     for p in model.parameters():
         p.requires_grad_(saved[id(p)])
+    if old_probe is not None:
+        model.eval()
+        diag["old_after_sleep"] = float(old_probe.run(model)[0].mean())
     return {"self_label_acc": float(np.mean([labels[i] == args.stream[i]["value"]
                                              for i in range(len(cues))])),
-            "sleep_steps": steps, "sleep_sents": len(sents)}
+            "sleep_steps": steps, "sleep_sents": len(sents), **diag}
 
 
 @torch.no_grad()
@@ -215,6 +347,26 @@ def main():
     ap.add_argument("--sleep_p_old", type=int, default=2)
     ap.add_argument("--sleep_batch", type=int, default=32)
     ap.add_argument("--sleep_replay", type=int, default=16, help="pretraining windows per step")
+    ap.add_argument("--write_loss", choices=["all", "noname", "answer"], default="all",
+                    help="target tokens a wake write trains on")
+    ap.add_argument("--sleep_fact_loss", choices=["all", "noname", "answer"], default="all")
+    ap.add_argument("--sleep_rehearse", type=int, default=0,
+                    help="old-entity statements (entities >= --n_eval_old) added per sleep step")
+    ap.add_argument("--sleep_freeze", choices=["none", "embed", "lower"], default="none",
+                    help="embed: freeze token/position embeddings; lower: also blocks below memory")
+    ap.add_argument("--n_eval_old", type=int, default=100, help="old entities reserved for eval")
+    ap.add_argument("--protect_gamma", type=float, default=0.0,
+                    help="down-weight slot scores by 1 + gamma * reads by non-eval old entities")
+    ap.add_argument("--protect_templates", choices=["all", "stream", "nonprobe"], default="all",
+                    help="templates whose cloze reads define the protected counts (stream = 0-6)")
+    ap.add_argument("--rehearse_labels", choices=["data", "teacher"], default="teacher",
+                    help="rehearsal answers: bio facts, or the frozen pretrained model's argmax")
+    ap.add_argument("--rehearse_templates", choices=["all", "nonprobe"], default="all",
+                    help="nonprobe: rehearse old entities only in templates 1-6, never the probes")
+    ap.add_argument("--clean_replay", action="store_true",
+                    help="reject replay/Fisher windows that mention an eval old entity")
+    ap.add_argument("--sleep_ewc", type=float, default=0.0,
+                    help="EWC strength, Fisher from clean pretraining windows, anchor = pretrained")
     ap.add_argument("--ckpt_every", type=int, default=250)
     ap.add_argument("--data_dir", default="data")
     ap.add_argument("--pretrained", default="runs/pretrain/model.pt")
@@ -226,6 +378,7 @@ def main():
     torch.manual_seed(args.seed)
     rng = random.Random(args.seed)  # paraphrase batches: identical across arms
     sleep_rng = random.Random(args.seed + 1000)
+    rehearse_rng = random.Random(args.seed + 2000)
     name = args.name or f"{args.arm}{'+sleep' if args.sleep else ''}_lr{args.lr:g}_s{args.seed}"
     os.makedirs(args.out, exist_ok=True)
     out_path = os.path.join(args.out, name + ".json")
@@ -237,10 +390,34 @@ def main():
     args.tok, args.stream = tok, stream
     model = load_model(args.pretrained)
     pretrained_values = model.mem.values.detach().clone()
-    replay = Replay(os.path.join(args.data_dir, "train.bin"), model.cfg.ctx, seed=args.seed)
+    assert not (args.sleep_ewc > 0 and not args.clean_replay), "EWC Fisher needs --clean_replay"
+    args.rehearse_tids = list(range(8)) if args.rehearse_templates == "all" else \
+        [t for t in range(8) if t not in (facts.PROBE_IN, facts.PROBE_HELDOUT)]
+    eval_names = [e["name"] for e in fj["old"][:args.n_eval_old]]
+    reject = None
+    if args.clean_replay:
+        dm = eval_doc_mask(os.path.join(args.data_dir, "train.bin"), tok, eval_names,
+                           os.path.join(args.data_dir, f"eval_doc_mask{args.n_eval_old}.npy"))
+        reject = touches_mask(dm, model.cfg.ctx)
+    replay = Replay(os.path.join(args.data_dir, "train.bin"), model.cfg.ctx, seed=args.seed,
+                    reject=reject)
+    assert args.n_eval_old == 100, "eval probes and leakage splits assume 100 eval entities"
+    pool = fj["old"][args.n_eval_old:]  # never the probed old entities
+    args.rehearse_pool = [(e["name"], r, e["attrs"][r]) for e in pool for r in facts.REL_NAMES]
+    if args.sleep and args.sleep_rehearse and args.rehearse_labels == "teacher":
+        tp = evals.Probe(tok, args.rehearse_pool, facts.PROBE_IN)
+        model.eval()
+        pred = tp.run(model)[2]  # the model is still the frozen pretrained one here
+        args.rehearse_pool = [(n, r, facts.RELATIONS[r][int(p)])
+                              for (n, r, _), p in zip(args.rehearse_pool, pred)]
+    ewc = None
+    if args.sleep and args.sleep_ewc > 0:
+        ids = model.dense_parameters()
+        fr = Replay(os.path.join(args.data_dir, "train.bin"), model.cfg.ctx, seed=99, reject=reject)
+        ewc = (fisher_diag(model, ids, fr, 64), [p.detach().clone() for p in ids], ids)
     vx, vy = evals.val_windows(os.path.join(args.data_dir, "val.bin"), 128, model.cfg.ctx)
     items = [(f["name"], f["rel"], f["value"]) for f in stream]
-    old_items = evals.old_fact_items(fj["old"], 100)
+    old_items = evals.old_fact_items(fj["old"], args.n_eval_old)
     probes = {"stream_in": evals.Probe(tok, items, facts.PROBE_IN),
               "stream_out": evals.Probe(tok, items, facts.PROBE_HELDOUT),
               "old_in": evals.Probe(tok, old_items, facts.PROBE_IN),
@@ -252,7 +429,16 @@ def main():
                            os.path.join(os.path.dirname(args.pretrained),
                                         f"bg_df_w{args.bg_windows}.pt"))
         idf = torch.log((1000 + 1) / (df + 1))
-        writer = SparseWriter(model, args.lr, args.t, idf)
+        protect = None
+        if args.protect_gamma > 0:
+            tids = {"all": range(8), "stream": facts.STREAM_TEMPLATES,
+                    "nonprobe": [t for t in range(8) if t not in (facts.PROBE_IN, facts.PROBE_HELDOUT)]}
+            suffix = "" if args.protect_templates == "all" else "_" + args.protect_templates
+            protect = args.protect_gamma * protected_counts(
+                model, tok, pool, os.path.join(os.path.dirname(args.pretrained),
+                                               f"protect_noneval{args.n_eval_old}{suffix}.pt"),
+                tids[args.protect_templates])
+        writer = SparseWriter(model, args.lr, args.t, idf, protect)
     elif args.arm == "B":
         for p in model.parameters():
             p.requires_grad_(False)
@@ -266,13 +452,16 @@ def main():
     acq_in, acq_out, acq_logp, overlaps, sleeps, write_steps = [], [], [], [], [], []
     model.train()
     for i, fact in enumerate(stream):
-        x, y, m = encode(tok, facts.paraphrase_batch(fact, args.batch, rng))
+        texts = facts.paraphrase_batch(fact, args.batch, rng)
+        x, y, m = encode(tok, texts)
+        lm = loss_mask(tok, texts, [fact["name"]] * len(texts), [fact["value"]] * len(texts),
+                       y, m, args.write_loss)
         done = None
         if not args.fixed_steps:
             def done(i=i):
                 with torch.no_grad():
                     return bool(probes["stream_in"].run(model, [i])[0][0])
-        info = writer.write(x, y, m, args.steps, done)
+        info = writer.write(x, y, m, args.steps, done, lm)
         write_steps.append(info["steps"])
         if "overlap" in info:
             overlaps.append(info["overlap"])
@@ -288,7 +477,7 @@ def main():
             pre_in = probes["stream_in"].run(model, idx)[0]
             cues = [(f["name"], f["rel"]) for f in stream[:n]]
             rec = sleep(model, args, cues, args.sleep_every, probes["stream_in"], writer,
-                        pretrained_values, replay, sleep_rng)
+                        pretrained_values, replay, sleep_rng, probes["old_in"], ewc, rehearse_rng)
             post_in = probes["stream_in"].run(model, idx)[0]
             r = slice(n - args.sleep_every, n)
             rec.update({"n_seen": n, "pre_recent": float(pre_in[r].mean()),
@@ -304,11 +493,12 @@ def main():
                   f" val {c['val_loss']:.3f} old_in {c['old_in']:.3f}"
                   f" ({time.time() - t0:.0f}s)", flush=True)
 
-    res = {"name": name, "args": {k: v for k, v in vars(args).items() if k not in ("tok", "stream")},
+    res = {"name": name, "args": {k: v for k, v in vars(args).items()
+                                  if k not in ("tok", "stream", "rehearse_pool")},
            "acq_in": acq_in, "acq_out": acq_out, "acq_logp_in": acq_logp,
            "slot_overlap": overlaps, "write_steps": write_steps, "checkpoints": ckpts,
            "sleeps": sleeps,
-           "seconds": time.time() - t0}
+           "replay_rejected": replay.rejected, "seconds": time.time() - t0}
     with open(out_path, "w") as f:
         json.dump(res, f)
 
