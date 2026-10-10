@@ -132,4 +132,4 @@ E1 `p06ans` at L*/2 and 2L*; E2 `ans` lr 0.5; E3 `C+sleepclean` lr 16.
 Filled in from the dev rules before any test run:
 
 - L* = 4 (freeze.py on runs/exp02_dev4: lr 4 meets all five eligibility checks: retention 0.79, held-out 0.63, old-fact drop 5.7, held-out drop 6.5, 0.6% at the cap; lr 8 fails with drop 11.7). Committed before any test run that uses it.
-- R = (pending dev wave 4)
+- R = gentle32 (freeze.py: both recipes pass the dev gate; gentle32 paired +0.31 retention, -12.0 old-fact drop, -0.004 NLL, summed dense damage 4.7 vs 7.3 for gentle, i.e. 2.6 points lower, with retention 0.752 vs 0.734 and NLL not higher). Committed before any sleep test run.
