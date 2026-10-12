@@ -67,6 +67,16 @@ class Runner:
         except subprocess.TimeoutExpired:
             return False
 
+    def ssh(self, script, timeout=600):
+        """Run a bash script on the runtime over SSH (steadier than the kernel channel)."""
+        proxy = f"ProxyCommand={' '.join(self.cli)} ssh --proxy-mode -s {self.a.session}"
+        r = subprocess.run(["ssh", "-q", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null",
+                            "-o", "LogLevel=ERROR", "-o", "ServerAliveInterval=30", "-o", proxy, "root@colab",
+                            "bash -s"], input=script, capture_output=True, text=True, timeout=timeout)
+        if r.returncode:
+            raise RuntimeError(f"ssh rc {r.returncode}: {(r.stdout + r.stderr)[-500:]}")
+        return r.stdout
+
     def alive(self):
         rc, out = self.run(["sessions"], timeout=120)
         return f"[{self.a.session}]" in out
@@ -82,15 +92,12 @@ class Runner:
             time.sleep(1200)
 
     def setup(self):
-        self.py(f"""
-import subprocess, os
-if not os.path.exists('/content/llm-exp'):
-    subprocess.run('git clone -q -b {self.a.branch} {REPO} /content/llm-exp', shell=True, check=True)
-else:
-    subprocess.run('cd /content/llm-exp && git pull -q origin {self.a.branch}', shell=True, check=True)
-os.makedirs('{REMOTE}/data', exist_ok=True); os.makedirs('{REMOTE}/runs', exist_ok=True)
-print(subprocess.run('cd /content/llm-exp && git log --oneline -1', shell=True, capture_output=True, text=True).stdout)
-""", timeout=300)
+        self.log(self.ssh(f"""set -e
+if [ -d /content/llm-exp ]; then cd /content/llm-exp && git pull -q origin {self.a.branch}
+else git clone -q -b {self.a.branch} {REPO} /content/llm-exp; fi
+mkdir -p {REMOTE}/data {REMOTE}/runs
+cd /content/llm-exp && git log --oneline -1
+""", timeout=300).strip())
         # restore the mirror (no logs, no optimizer state once pretraining is done)
         done = os.path.exists(os.path.join(self.mirror, "runs/pretrain/done"))
         n = 0
@@ -102,7 +109,7 @@ print(subprocess.run('cd /content/llm-exp && git log --oneline -1', shell=True, 
                     continue
                 if done and rel.endswith("resume.pt"):
                     continue
-                self.py(f"import os\nos.makedirs(os.path.dirname('{REMOTE}/{rel}'), exist_ok=True)")
+                self.ssh(f"mkdir -p '{os.path.dirname(f'{REMOTE}/{rel}')}'", timeout=120)
                 if not self.scp(p, f":{REMOTE}/{rel}"):
                     rc, out = self.run(["upload", "-s", self.a.session, p, f"{REMOTE}/{rel}"], timeout=3600)
                     if rc:
@@ -117,19 +124,18 @@ print(subprocess.run('cd /content/llm-exp && git log --oneline -1', shell=True, 
         self.log(f"restored {n} files")
 
     def driver_running(self):
-        return self.py("import subprocess\nprint(subprocess.run('pgrep -f [r]un_exp03.py', shell=True,"
-                       " capture_output=True, text=True).stdout.strip() != '')") == "True"
+        return self.ssh("pgrep -f '[r]un_exp03.py' >/dev/null && echo True || echo False", 120).strip() == "True"
 
     def start_driver(self):
-        cmd = (f"cd /content/llm-exp/exp03_scale && nohup python -u run_exp03.py --stage all --data {REMOTE}/data"
-               f" --runs {REMOTE}/runs --device cuda --workers {self.a.workers} --budget_cu 1e9"
-               f" --cu_per_hour {self.a.cu_per_hour} >> {REMOTE}/driver.log 2>&1 &")
-        self.py(f"import subprocess\nsubprocess.Popen({cmd!r}, shell=True)\nprint('started')")
+        self.ssh(f"cd /content/llm-exp/exp03_scale && setsid nohup python3 -u run_exp03.py --stage all"
+                 f" --data {REMOTE}/data --runs {REMOTE}/runs --device cuda --workers {self.a.workers}"
+                 f" --budget_cu 1e9 --cu_per_hour {self.a.cu_per_hour} >> {REMOTE}/driver.log 2>&1 < /dev/null &",
+                 120)
         self.log("driver started")
 
     # ------------------------------------------------------------ mirror
     def manifest(self):
-        out = self.py(f"""
+        out = self.ssh(f"""python3 - <<'PY'
 import os, json
 m = {{}}
 for top in ('data', 'runs'):
@@ -141,8 +147,9 @@ for top in ('data', 'runs'):
             p = os.path.join(r, f); st = os.stat(p)
             m[os.path.relpath(p, '{REMOTE}')] = [st.st_size, int(st.st_mtime)]
 print(json.dumps(m))
-""", timeout=120)
-        return json.loads(out)
+PY
+""", timeout=180)
+        return json.loads(out.strip().splitlines()[-1])
 
     def want(self, rel, size, man):
         if rel.endswith("model.pt") and "runs/pretrain/done" not in man:
@@ -214,7 +221,7 @@ print(json.dumps(m))
             raise RuntimeError(f"{rel}: size or checksum mismatch (changed while copying?)")
 
     def tail(self, n=1200):
-        return self.py(f"import os\np='{REMOTE}/driver.log'\nprint(open(p).read()[-{n}:] if os.path.exists(p) else '')")
+        return self.ssh(f"tail -c {n} {REMOTE}/driver.log 2>/dev/null || true", 120)
 
     # ------------------------------------------------------------ main loop
     def loop(self):
@@ -225,6 +232,11 @@ print(json.dumps(m))
                     self.log("no runtime; creating one")
                     self.new_session()
                     self.api_broken = False
+                    self.setup()
+                    fresh = True
+                elif self.ssh(f"test -d /content/llm-exp && test -f {REMOTE}/data/train.bin && echo ok || echo no",
+                              120).strip() != "ok":
+                    self.log("runtime up but not set up; restoring")
                     self.setup()
                     fresh = True
                 if not self.driver_running():
