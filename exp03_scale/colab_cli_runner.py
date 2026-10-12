@@ -109,6 +109,8 @@ cd /content/llm-exp && git log --oneline -1
                     continue
                 if done and rel.endswith("resume.pt"):
                     continue
+                if "/state/" in rel and os.path.exists(os.path.join(self.mirror, rel.replace("/state/", "/")[:-3] + ".json")):
+                    continue  # that run finished; its resume state is stale
                 self.ssh(f"mkdir -p '{os.path.dirname(f'{REMOTE}/{rel}')}'", timeout=120)
                 if not self.scp(p, f":{REMOTE}/{rel}"):
                     rc, out = self.run(["upload", "-s", self.a.session, p, f"{REMOTE}/{rel}"], timeout=3600)

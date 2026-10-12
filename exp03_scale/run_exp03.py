@@ -148,6 +148,9 @@ def stream_cmd(a, arm, lr, seed, out, n_facts):
            "--bg_windows", str(a.bg_windows)]
     if a.dry:  # a few sleeps inside the 40-fact dry streams
         cmd += ["--sleep_every", "10"]
+    if "gentle32" in arm:  # hour-long runs: save every 100 facts so a lost runtime costs minutes
+        os.makedirs(os.path.join(out, "state"), exist_ok=True)
+        cmd += ["--state", os.path.join(out, "state", name + ".pt"), "--save_every", "100"]
     return name, cmd
 
 

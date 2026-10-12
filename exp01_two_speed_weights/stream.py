@@ -196,6 +196,13 @@ class SparseWriter:
         self.written = torch.zeros(model.mem.n_slots, dtype=torch.bool, device=dev)  # since last reset
         self.ever = torch.zeros(model.mem.n_slots, dtype=torch.bool, device=dev)
 
+    def state(self):
+        return {"written": self.written, "ever": self.ever}
+
+    def load_state(self, st):
+        self.written.copy_(st["written"])
+        self.ever.copy_(st["ever"])
+
     def select(self, x, mask):
         mem = self.model.mem
         mem.record = True
@@ -230,6 +237,12 @@ class AdamWriter:
         self.model, self.params = model, params
         self.opt = torch.optim.AdamW(params, lr=lr, betas=(beta1, 0.999), weight_decay=0.0,
                                      fused=True)
+
+    def state(self):
+        return self.opt.state_dict()
+
+    def load_state(self, st):
+        self.opt.load_state_dict(st)
 
     def write(self, x, y, mask, steps, done=None, lmask=None):
         for n in range(1, steps + 1):
@@ -380,6 +393,8 @@ def main():
     ap.add_argument("--name", default="")
     ap.add_argument("--threads", type=int, default=1)
     ap.add_argument("--device", default="cpu", help="cpu or cuda")
+    ap.add_argument("--state", default="", help="resume file: saved every --save_every facts, picked up on restart")
+    ap.add_argument("--save_every", type=int, default=100)
     args = ap.parse_args()
     torch.set_num_threads(args.threads)
     torch.manual_seed(args.seed)
@@ -458,11 +473,23 @@ def main():
     else:
         writer = AdamWriter(model, list(model.parameters()), args.lr, args.beta1)
 
-    t0 = time.time()
-    ckpts = [checkpoint(model, 0, probes, vx, vy, n_probe=len(stream))]  # baseline
-    acq_in, acq_out, acq_logp, overlaps, sleeps, write_steps = [], [], [], [], [], []
+    t0, spent, start = time.time(), 0.0, 0
+    if args.state and os.path.exists(args.state):  # resume an interrupted run where it stopped
+        st = torch.load(args.state, map_location=args.device, weights_only=False)
+        model.load_state_dict(st["model"])
+        writer.load_state(st["writer"])
+        rng.setstate(st["rng"]); sleep_rng.setstate(st["sleep_rng"]); rehearse_rng.setstate(st["rehearse_rng"])
+        torch.set_rng_state(st["torch_rng"])
+        replay.rng.bit_generator.state, replay.rejected = st["replay_rng"], st["replay_rejected"]
+        ckpts, acq_in, acq_out, acq_logp, overlaps, sleeps, write_steps = st["lists"]
+        start, spent = st["n"], st["seconds"]
+        print(f"[{name}] resumed at {start} facts", flush=True)
+    else:
+        ckpts = [checkpoint(model, 0, probes, vx, vy, n_probe=len(stream))]  # baseline
+        acq_in, acq_out, acq_logp, overlaps, sleeps, write_steps = [], [], [], [], [], []
     model.train()
-    for i, fact in enumerate(stream):
+    for i in range(start, len(stream)):
+        fact = stream[i]
         texts = facts.paraphrase_batch(fact, args.batch, rng)
         x, y, m = encode(tok, texts)
         lm = loss_mask(tok, texts, [fact["name"]] * len(texts), [fact["value"]] * len(texts),
@@ -503,16 +530,26 @@ def main():
                   f" ret_in {np.mean(c['ret_in']):.2f} ret_out {np.mean(c['ret_out']):.2f}"
                   f" val {c['val_loss']:.3f} old_in {c['old_in']:.3f}"
                   f" ({time.time() - t0:.0f}s)", flush=True)
+        if args.state and n % args.save_every == 0 and n < len(stream):
+            torch.save({"n": n, "seconds": spent + time.time() - t0, "model": model.state_dict(),
+                        "writer": writer.state(), "rng": rng.getstate(), "sleep_rng": sleep_rng.getstate(),
+                        "rehearse_rng": rehearse_rng.getstate(), "torch_rng": torch.get_rng_state(),
+                        "replay_rng": replay.rng.bit_generator.state, "replay_rejected": replay.rejected,
+                        "lists": (ckpts, acq_in, acq_out, acq_logp, overlaps, sleeps, write_steps)},
+                       args.state + ".tmp")
+            os.replace(args.state + ".tmp", args.state)
 
     res = {"name": name, "args": {k: v for k, v in vars(args).items()
                                   if k not in ("tok", "stream", "rehearse_pool")},
            "acq_in": acq_in, "acq_out": acq_out, "acq_logp_in": acq_logp,
            "slot_overlap": overlaps, "write_steps": write_steps, "checkpoints": ckpts,
            "sleeps": sleeps,
-           "replay_rejected": replay.rejected, "seconds": time.time() - t0}
+           "replay_rejected": replay.rejected, "seconds": spent + time.time() - t0}
     with open(out_path + ".tmp", "w") as f:  # atomic: a copy taken mid-write never looks finished
         json.dump(res, f)
     os.replace(out_path + ".tmp", out_path)
+    if args.state and os.path.exists(args.state):
+        os.remove(args.state)
 
 
 if __name__ == "__main__":
