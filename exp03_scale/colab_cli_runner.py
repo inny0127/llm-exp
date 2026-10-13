@@ -57,7 +57,7 @@ class Runner:
         """scp through `colab ssh --proxy-mode` (about 20 MB/s); remote paths start with ':'."""
         if not shutil.which("scp"):
             return False
-        proxy = f"ProxyCommand={' '.join(self.cli)} ssh --proxy-mode -s {self.a.session}"
+        proxy = f"ProxyCommand={' '.join(self.cli)} ssh --proxy-mode -s {self.a.session} --gpu {self.a.gpu}"
         fix = lambda x: "root@colab" + x if x.startswith(":") else x  # noqa: E731
         try:
             r = subprocess.run(["scp", "-q", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null",
@@ -69,7 +69,7 @@ class Runner:
 
     def ssh(self, script, timeout=600):
         """Run a bash script on the runtime over SSH (steadier than the kernel channel)."""
-        proxy = f"ProxyCommand={' '.join(self.cli)} ssh --proxy-mode -s {self.a.session}"
+        proxy = f"ProxyCommand={' '.join(self.cli)} ssh --proxy-mode -s {self.a.session} --gpu {self.a.gpu}"
         r = subprocess.run(["ssh", "-q", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null",
                             "-o", "LogLevel=ERROR", "-o", "ServerAliveInterval=30", "-o", proxy, "root@colab",
                             "bash -s"], input=script, capture_output=True, text=True, timeout=timeout)
@@ -79,7 +79,12 @@ class Runner:
 
     def alive(self):
         rc, out = self.run(["sessions"], timeout=120)
-        return f"[{self.a.session}]" in out
+        line = next((l for l in out.splitlines() if f"[{self.a.session}]" in l), None)
+        if line and f"Hardware: {self.a.gpu}" not in line:  # e.g. a CPU runtime auto-created by `colab ssh`
+            self.log("runtime has the wrong hardware; stopping it:", line.strip())
+            self.run(["stop", "-s", self.a.session], timeout=300)
+            return False
+        return line is not None
 
     # ------------------------------------------------------------ session setup
     def new_session(self):
@@ -105,7 +110,8 @@ cd /content/llm-exp && git log --oneline -1
             for f in files:
                 p = os.path.join(root, f)
                 rel = os.path.relpath(p, self.mirror)
-                if rel.startswith(".") or rel in ("orchestrator.log", "runner.out") or "/logs/" in rel or rel.endswith(".log"):
+                if rel.startswith(".") or rel in ("orchestrator.log", "runner.out") or "/logs/" in rel \
+                        or rel.endswith((".log", ".dl", ".tmp")):
                     continue
                 if done and rel.endswith("resume.pt"):
                     continue
