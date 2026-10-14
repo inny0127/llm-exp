@@ -1,0 +1,10 @@
+{"step": 2000, "tokens": 32768000, "val_loss": 1.774643063545227, "old_acc_in": 0.075, "old_acc_heldout": 0.085, "slot_use_last_batch": 0.5838775634765625, "elapsed_s": 912.0636768341064}
+{"step": 4000, "tokens": 65536000, "val_loss": 1.5927429795265198, "old_acc_in": 0.08833333333333333, "old_acc_heldout": 0.08666666666666667, "slot_use_last_batch": 0.7352676391601562, "elapsed_s": 1862.4834036827087}
+{"step": 6000, "tokens": 98304000, "val_loss": 1.4985275268554688, "old_acc_in": 0.17666666666666667, "old_acc_heldout": 0.18833333333333332, "slot_use_last_batch": 0.788787841796875, "elapsed_s": 2814.3761947155}
+{"step": 8000, "tokens": 131072000, "val_loss": 1.440797746181488, "old_acc_in": 0.6966666666666667, "old_acc_heldout": 0.7066666666666667, "slot_use_last_batch": 0.8166465759277344, "elapsed_s": 3787.3661069869995}
+{"step": 10000, "tokens": 163840000, "val_loss": 1.3843415975570679, "old_acc_in": 0.9266666666666666, "old_acc_heldout": 0.9366666666666666, "slot_use_last_batch": 0.8352165222167969, "elapsed_s": 4751.26015663147}
+{"step": 12000, "tokens": 196608000, "val_loss": 1.3449441194534302, "old_acc_in": 0.9866666666666667, "old_acc_heldout": 0.9916666666666667, "slot_use_last_batch": 0.845733642578125, "elapsed_s": 5714.620401144028}
+{"step": 14000, "tokens": 229376000, "val_loss": 1.3109756708145142, "old_acc_in": 0.9883333333333333, "old_acc_heldout": 0.9933333333333333, "slot_use_last_batch": 0.8525657653808594, "elapsed_s": 6684.414246559143}
+{"step": 16000, "tokens": 262144000, "val_loss": 1.2836010456085205, "old_acc_in": 0.9983333333333333, "old_acc_heldout": 0.9966666666666667, "slot_use_last_batch": 0.8563499450683594, "elapsed_s": 7650.326462030411}
+{"step": 18000, "tokens": 294912000, "val_loss": 1.2695305347442627, "old_acc_in": 1.0, "old_acc_heldout": 1.0, "slot_use_last_batch": 0.8606796264648438, "elapsed_s": 856.4137918949127}
+{"step": 18239, "tokens": 298827776, "val_loss": 1.267550766468048, "old_acc_in": 1.0, "old_acc_heldout": 1.0, "slot_use_last_batch": 0.8577499389648438, "elapsed_s": 986.0416762828827}

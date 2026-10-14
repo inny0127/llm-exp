@@ -18,7 +18,7 @@ The recipe is the protected answer-only writer plus gentle sleep.
   prep, probe, dev, freeze, test, analyze and package. It is resumable through a Drive mirror
   and keeps track of the budget. `--dry --device cpu` runs the whole pipeline in miniature.
 - `tokenizer.json`: Exp 01's tokenizer, reused so that names split the same way.
-- `results_colab/`: results pushed back from Colab (when present).
+- `RESULTS.md`: results (interim until all 15 test runs land); `results_attempt2/` holds the runs, `results_attempt1/` the lost first attempt.
 
 ## Engine
 

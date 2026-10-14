@@ -1,0 +1,4 @@
+stories: train 2175491, val 27630
+train tokens 300,000,116 (bios 10,834,565 = 3.6%), val tokens 5,579,587, stories used 1,422,294 (203 tok/story)
+example: Jounberk Brenjael lives in the cave. -> ['J', 'oun', 'ber', 'k', 'ĠB', 'ren', 'j', 'a', 'el', 'Ġli', 'ves', 'Ġin', 'Ġthe', 'Ġcave', '.']
+bio: When Jounberk Brenjael is hungry, Jounberk Brenjael asks for bread. Every night, Jounberk Brenjael feeds a pet crab. The job of Jounberk Brenjael is being a cook. Jounberk Brenjael lives in a small house in the cave. A boat is the toy Jounberk Brenjael loves most. Jounberk Brenjael loves the color red.

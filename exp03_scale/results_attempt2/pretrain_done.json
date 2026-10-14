@@ -1,0 +1,1 @@
+{"step": 18239, "tokens": 298827776, "val_loss": 1.267550766468048, "old_acc_in": 1.0, "old_acc_heldout": 1.0, "slot_use_last_batch": 0.8577499389648438, "elapsed_s": 986.0416762828827}
