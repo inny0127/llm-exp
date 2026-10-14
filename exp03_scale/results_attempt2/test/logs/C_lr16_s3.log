@@ -1,0 +1,8 @@
+[C_lr16_s3] 250 facts: acq_in 1.00 ret_in 0.84 ret_out 0.82 val 1.268 old_in 0.657 (29s)
+[C_lr16_s3] 500 facts: acq_in 1.00 ret_in 0.73 ret_out 0.72 val 1.268 old_in 0.480 (56s)
+[C_lr16_s3] 750 facts: acq_in 1.00 ret_in 0.69 ret_out 0.67 val 1.268 old_in 0.458 (85s)
+[C_lr16_s3] 1000 facts: acq_in 1.00 ret_in 0.64 ret_out 0.63 val 1.268 old_in 0.425 (117s)
+[C_lr16_s3] 1250 facts: acq_in 1.00 ret_in 0.64 ret_out 0.62 val 1.268 old_in 0.405 (150s)
+[C_lr16_s3] 1500 facts: acq_in 1.00 ret_in 0.61 ret_out 0.58 val 1.268 old_in 0.397 (183s)
+[C_lr16_s3] 1750 facts: acq_in 1.00 ret_in 0.58 ret_out 0.56 val 1.268 old_in 0.382 (218s)
+[C_lr16_s3] 2000 facts: acq_in 1.00 ret_in 0.57 ret_out 0.55 val 1.268 old_in 0.378 (240s)

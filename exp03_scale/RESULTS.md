@@ -1,149 +1,170 @@
-# Exp 03 results (interim): the Exp 02 recipe at 8x scale and 4x longer streams
+# Exp 03 results: the Exp 02 recipe at 8x scale and 4x longer streams
 
-> **Status: interim.** 2 of 15 test runs are done; the other 13 are queued on a free Colab
-> T4. The free tier grants about one 2-hour runtime a day, so they will take a few more days.
-> This page states what the finished runs already settle and what they do not. It is updated
-> as runs land.
->
-> Under DESIGN.md, the formal verdict needs all 15 test runs. The finished runs bound the
-> combined arm firmly enough that no outcome of the remaining runs can make it pass.
+> **Status: 14 of 15 test runs done.** The last one, `C+gentle32` seed 1, is saved at 500
+> of 2,000 facts and resumes on the next free Colab runtime. It cannot change any verdict
+> below (bounds given), but DESIGN.md asks for all runs before the formal verdict. This page
+> is updated when it lands.
 
-**Bottom line so far.**
+**Bottom line.**
 
-- **The wake fix scales very well.** On dev (seed 0), the protected answer-only writer stores
-  2,000 facts at 0.96 retention while losing 0.5 points of old facts. Without protection,
-  the Exp 01 writer loses 60-79 points; full fine-tuning loses 88.
-- **The sleep fix does not scale.** On two test seeds, gentle sleep raises retention to 0.99
-  but costs 32 points of old facts, against a 10-point bar.
-  - Every point comes from the dense update. It takes about 1.7 points per sleep, roughly
-    flat over the 19 sleeps.
-  - Resetting the written slots gives back nothing, because the protected writer barely
-    damages old facts to begin with.
-  - Exp 02 predicted this accumulation.
-- **The recipe as a whole does not scale.** The combined arm cannot meet the 10-point bar:
-  its two finished seeds lost 32.0 and 32.7 points. Even a third seed that lost nothing
-  would leave the mean above 21.
-- **The next lever is the sleep.** Either change the dense consolidation step or drop it.
-  At this scale the writer alone already does most of what the recipe was meant to do.
+- **The wake fix scales.** On three test streams of 2,000 new facts, the protected
+  answer-only writer keeps **0.95** of them and loses **0.7 points** of old facts, with
+  general text untouched (+0.001 nats).
+  - Without protection, the Exp 01 writer loses 61 points.
+  - Full fine-tuning loses 89 points and keeps 0.13 of the facts.
+- **The sleep fix does not scale.** Gentle sleep lifts retention to 0.99 but costs **31
+  points** of old facts, and the recipe fails its bar.
+  - The cost is all dense update: about 1.6 points per sleep, accumulating over 19 sleeps.
+  - Paired with the unprotected writer, the same sleep *lowers* retention (0.57 → 0.45),
+    because it consolidates the writer's own mistakes.
+- **What this means for two-speed weights at this scale:** the fast weights carry the
+  learning and the slow weights get in the way. The next experiment should change or drop
+  the dense consolidation, not the writer.
 
-## Setup (attempt 2; DESIGN.md has the full pre-registration and amendments)
+![Retention vs old-fact loss](results/frontier_seeds1-2-3.png)
+
+Full table: [`results/table_seeds1-2-3.md`](results/table_seeds1-2-3.md). The decision
+rules, applied mechanically with per-seed values, are in
+[`results/decision_seeds1-2-3.json`](results/decision_seeds1-2-3.json). The run files are
+in `results_attempt2/`.
+
+## Verdict against the pre-registered rules
+
+| Rule (means over seeds 1-3) | Result | Verdict |
+|---|---|---|
+| **FU1:** `p06ans` at L* = 4 (bar: drop <= 10, retention >= 0.45; guards: held-out drop <= 10, held-out retention >= 0.40) | drop 0.7 ± 0.5, retention 0.953; held-out 0.8 / 0.850 | **Pass** (not marginal) |
+| **FU2:** `C+gentle32` minus `C` at lr 16 (bar: dNLL <= +0.02, drop change <= +3, retention change >= +0.10, same guards, consolidation intact) | 2 of 3 pairs: retention -0.125, held-out -0.094, drop -3.2, dNLL +0.020, consolidation intact | **Fail** on retention. Not formally final: one pair is missing, but the third pair would need +0.55, above any possible value. |
+| **Combined:** `p06ans+gentle32` at L* = 4 (FU1 bar absolute, FU2 bar against `p06ans`) | drop 30.7 ± 2.3, retention 0.987; paired retention +0.034, drop +30.0 | **Fail** |
+| **The recipe scales** (FU1 and Combined) | | **No** |
+
+## Results (test, seeds 1-3, 2,000 facts each)
+
+Old-fact drop and held-out drop are in points.
+
+| Arm | LR | Seeds | Retention | Held-out | First 100 | Old-fact drop | Held-out drop | Delta NLL |
+|---|---|---|---|---|---|---|---|---|
+| Full fine-tuning `A` | 3e-5 | 3 | 0.13 | 0.12 | 0.06 | 89.0 ± 0.5 | 87.9 | +0.319 |
+| Exp 01 writer `C` | 16 | 3 | 0.57 | 0.54 | 0.43 | 61.1 ± 1.3 | 62.3 | +0.001 |
+| `C` + gentle sleep | 16 | 2 | 0.45 | 0.45 | 0.24 | 57.6 ± 2.6 | 57.0 | +0.021 |
+| **Protected answer-only `p06ans`** | **4** | **3** | **0.95** | **0.85** | **0.93** | **0.7 ± 0.5** | **0.8** | **+0.001** |
+| `p06ans` + gentle sleep | 4 | 3 | 0.99 | 0.98 | 0.99 | 30.7 ± 2.3 | 30.3 | +0.018 |
+
+### 1. Writing: protection becomes more important, and works better, at scale
+
+| Writer | 3.8M model, 500 facts (Exp 02) | This model, 2,000 facts |
+|---|---|---|
+| Exp 01 writer | 23.9 points lost | 61.1 points lost, 37 of them within the first 250 facts (dev) |
+| Protected answer-only | 7.9 points lost | 0.7 points lost; on dev the drop stays under 0.5 for the whole stream |
+
+- Before the run, Exp 02 predicted that the protected writer would cross 10 points at 2,000
+  facts. It did not. In the larger memory, protection removes nearly all overlap with what
+  old entities read.
+- Several things changed at once between the two columns: model, memory size, top-k,
+  context, stream length and LR. So this compares two configurations and isolates no single
+  factor (see Limits).
+
+### 2. Sleep: the dense update is the bottleneck, and it does not shrink with scale
+
+Each sleep logs old-fact accuracy before the sleep, after the written slots are reset, and
+after the dense update. All figures are in points.
+
+| Arm | Reset gives back (sum over 19 sleeps) | Dense update takes (sum) | Dense update per sleep |
+|---|---|---|---|
+| `p06ans` + gentle sleep (3 seeds) | -1.2 | 30.8 | 1.6 |
+| `C` + gentle sleep (2 seeds) | 462 (about 24 per sleep) | 37.8 | 2.0 |
+| *Exp 02, 3.8M model, `p06ans` + gentle sleep (4 sleeps)* | *5.5* | *6.7* | *1.7* |
+
+With the protected writer there is nothing for the reset to repair, so each sleep is a pure
+cost.
+
+- **The cost is steady.** The old-fact loss grows from about 3-5 points after 250 facts to
+  about 31 by the end.
+- **It matches the 3.8M model.** The per-sleep rate (1.6) is the same as Exp 02 measured
+  on the smaller model.
+- **The damage lands on knowledge the sleep never sees.** The probed old entities are
+  excluded from rehearsal by design, so this is interference on facts outside the training
+  data. Rehearsing other old entities (32 sentences per step) does not protect them.
+
+**Sleep does its own job almost perfectly.**
+
+- Self-labelling accuracy is 0.99.
+- Consolidation loses 0.0002 on average.
+- Retention rises to 0.99, and the held-out template rises from 0.85 to 0.98. So
+  consolidation generalises a fact across phrasings.
+
+The cost is entirely collateral.
+
+### 3. Why sleep hurts the unprotected writer
+
+- **The writer wipes old facts, and the reset undoes it.** The Exp 01 writer wipes about 25
+  points of old facts in every 100-fact block. Resetting its slots restores them (old-fact
+  accuracy is back to 0.93-1.00 after each reset).
+- **But the sleep consolidates whatever the model answers.** By sleep time, the writer
+  answers only about 63% of the stream correctly (self-labelling accuracy 0.62-0.64). Sleep
+  writes those answers, wrong ones included, into the dense weights.
+- **So retention falls** from 0.57 to 0.45.
+
+Self-labelled consolidation is only as good as the fast weights it reads from.
+
+## Exp 02's predictions, checked
+
+| Prediction (written before Exp 03 ran) | Outcome |
+|---|---|
+| The protected writer alone exceeds 10 points at 2,000 facts | **Wrong:** 0.7 points |
+| At about 0.3 points net per sleep, the combined arm's 2.1-point margin will not survive 19 sleeps | **Right, and worse:** the reset gave back nothing at scale, so the net cost was the full 1.6 per sleep, for 30.7 points |
+| If either fails, the next lever is the dense update, not the writer | Holds |
+
+## Limits
+
+- **Scale is confounded.** The "scale" comparison changes model size, memory size, top-k,
+  context, stream length and the selected LRs together. Separating them needs single-factor
+  ablations on one model: stream length alone, memory size alone.
+- **Toy setting.** The data is TinyStories and synthetic entities with 6 relations. Answers
+  are single tokens, and probes are cloze prompts scored among each relation's candidate
+  values (chance is about 7%). Nothing here tests real facts or a real pretrained LLM.
+- **One pretrained model** for all test runs, plus attempt 1's lost model. Attempt 1 agrees
+  within a few points on dev and on its 2 test runs.
+- **Few seeds and noisy sleeps.** The per-sleep damage varies from -3.5 to +6.5 points
+  between sleeps. The 1.6-point mean rests on 57 sleeps over 3 seeds.
+- **Missing baselines.** There are no replay-based continual learning, LoRA, model-editing
+  (ROME/MEMIT) or EWC baselines at this scale. Exp 01 covered LoRA and EWC at the smaller
+  scale only.
+
+## Next (Exp 04 candidates; not yet pre-registered)
+
+1. **Writer only, no sleep:** test whether its 0.95 retention holds over longer streams
+   (10K facts) and more seeds.
+2. **Sleep without collateral damage:**
+   - train only the blocks above the memory layer;
+   - consolidate into a fresh memory region;
+   - or sleep less often (the damage is per sleep).
+3. **Sleep that cannot learn the writer's mistakes:** consolidate only facts the model
+   answers with high confidence. A model-free alternative is to keep the stream text and
+   label from it rather than from self-quizzing.
+4. **Single-factor ablations** to turn "at scale" into specific claims: stream length,
+   memory size and top-k, each varied alone on one model.
+
+## Setup and logistics
 
 | | |
 |---|---|
-| Model | 8 layers, d 512, ctx 256 |
-| Parameters | 26M dense + 134M memory (512² slots, 4 heads x top-32) |
-| Pretraining | 299M tokens, fp16 on a T4, resumed once across runtimes |
+| Model | 8 layers, d 512, ctx 256; 26M dense + 134M memory parameters (512² slots, 4 heads x top-32) |
+| Pretraining | 299M tokens, fp16 on a free T4, resumed once across runtimes |
 | Pretrained model | held-out loss 1.268; old-fact accuracy 1.00 on template 0 and 1.00 on the held-out template (validity bar: 0.80) |
-| Streams | 2,000 new facts; sleep every 100 facts (19 sleeps) |
-| Frozen on dev | L* = 4 for `p06ans` (eligible, no flag); C LR = 16; A LR = 3e-5; R = gentle32 (fixed by Exp 02) |
+| Dev, seed 0 (`results_attempt2/dev/`) | L* = 4 for `p06ans` (eligible, no flag); C LR = 16; A LR = 3e-5; R = gentle32, fixed by Exp 02 |
+| Attempt 1 (`results_attempt1/`) | Same data, a different pretrained model, lost before its test finished. Reported, not counted. |
 
-Attempt 1 is in `results_attempt1/`: same data, a different pretrained model that was lost
-before its test finished. It is reported, not counted. Its dev results and 2 test runs agree
-with attempt 2 to within a few points.
+**Hardware.** The Colab account had no compute units and no A100 access, so everything ran
+on free T4 runtimes. `colab_cli_runner.py` drove them through the Colab CLI. Runtimes lasted
+2-5 hours, and a new one was granted about once a day.
 
-## Dev (seed 0, 2,000 facts; selects LRs only)
+**Problems, and the checked fixes they forced:**
 
-Old-fact drop is in points. The curve column gives the drop at every 250 facts.
-
-| Writer | LR | Retention | Held-out | First 100 | Old-fact drop | Delta NLL | Old-fact drop curve |
-|---|---|---|---|---|---|---|---|
-| `p06ans` | 2 | 0.937 | 0.764 | 0.90 | 0.2 | +0.001 | 0.2 → 0.2 |
-| **`p06ans`** | **4** | **0.964** | **0.854** | **0.92** | **0.5** | **+0.001** | 0.2 → 0.5 |
-| `p06ans` | 8 | 0.964 | 0.903 | 0.91 | 1.8 | +0.003 | 0.2 → 1.8 |
-| `p06ans` | 16 | 0.970 | 0.929 | 0.95 | 5.0 | +0.011 | 0.5 → 5.0 |
-| `C` (Exp 01 writer) | 16 | 0.554 | 0.530 | 0.41 | 60.0 | +0.001 | 36.8 at 250 → 60.0 |
-| `C` | 32 | 0.562 | 0.533 | 0.47 | 71.2 | +0.002 | 65.0 at 250 → 71.2 |
-| `C` | 64 | 0.546 | 0.509 | 0.51 | 79.0 | +0.005 | 77.5 at 250 → 79.0 |
-| `A` (full FT) | 3e-6 | 0.081 | 0.093 | 0.07 | 88.2 | +0.136 | 49.8 at 250 → 88.2 |
-| `A` | 1e-5 | 0.097 | 0.093 | 0.07 | 88.3 | +0.168 | 58.5 at 250 → 88.3 |
-| `A` | 3e-5 | 0.114 | 0.115 | 0.07 | 87.5 | +0.300 | 76.2 at 250 → 87.5 |
-
-**Scale made the Exp 01 writer much worse and the protected writer much better.**
-
-- At 500 facts on the 3.8M model, the two writers lost 23.9 and 7.9 points (Exp 02, test).
-  Here the Exp 01 writer loses 37-78 points within the first 250 facts.
-  - It writes the top-128 TF-IDF slots of each fact's sentences, name pieces and template
-    words included.
-  - In a 262K-slot memory those slots are concentrated, and heavily shared with the old
-    entities.
-- Training only the answer token and down-weighting slots that known entities read
-  (`p06ans`) stops nearly all of it.
-- Exp 02 predicted that the writer alone would cross the 10-point bar at 2,000 facts. That
-  prediction was wrong: the larger memory made protection more effective, not less.
-
-## Test (seeds 1-3): 2 of 15 runs done
-
-| Run | Retention | Held-out | First 100 | Old-fact drop | Held-out drop | Delta NLL |
-|---|---|---|---|---|---|---|
-| `p06ans+gentle32` lr 4, seed 1 | 0.986 | 0.984 | 0.97 | 32.0 | 31.7 | +0.016 |
-| `p06ans+gentle32` lr 4, seed 2 | 0.988 | 0.985 | 1.00 | 32.7 | 31.3 | +0.018 |
-| *attempt 1, seed 1 (other model)* | *0.994* | *0.989* | | *29.0* | *28.3* | *+0.016* |
-| *attempt 1, seed 2 (other model)* | *0.987* | *0.984* | | *27.8* | *26.5* | *+0.014* |
-
-Old-fact drop over the stream, at every 250 facts:
-
-- Seed 1: 5.0, 8.0, 12.5, 14.7, 18.7, 28.7, 25.3, 32.0.
-- Seed 2: 3.0, 12.3, 10.3, 12.7, 19.2, 25.7, 27.7, 32.7.
-
-The loss grows steadily with the number of sleeps, while the writer alone (dev) stays flat.
-
-Each sleep logs old-fact accuracy before the sleep, after the slot reset, and after the
-dense update:
-
-| | Seed 1 | Seed 2 |
-|---|---|---|
-| Slot reset gives back (sum over 19 sleeps) | -3.5 | -0.7 |
-| Dense update takes (sum) | 32.0 | 32.8 |
-| Dense update per sleep (mean) | 1.7 | 1.7 |
-| Self-labelling accuracy | 0.987 | 0.990 |
-| Consolidation loss (pre_all - post_all) | 0.0003 | 0.0001 |
-
-The sleep does its own job almost perfectly:
-
-- it labels the stream facts correctly 99% of the time;
-- it moves them into the dense weights without loss;
-- it lifts retention from about 0.96 (writer alone, dev) to about 0.99, with the held-out
-  template at 0.98.
-
-But each sleep's dense update still interferes with the probed old entities. Those
-entities are deliberately excluded from rehearsal, so they measure interference on
-knowledge the sleep never sees. At about 1.7 points per sleep, this is the same rate Exp 02
-measured on the 3.8M model (1.5-1.7 per sleep). Scaling the model 8x did not reduce it,
-and a 4x longer stream multiplies it.
-
-## Verdict against the pre-registered rules (provisional)
-
-| Rule | Status |
-|---|---|
-| FU1: `p06ans` at L* = 4 (bar: drop <= 10, retention >= 0.45, held-out guards) | **Pending** (0 of 3 test runs). Dev: drop 0.5, retention 0.96. |
-| FU2: `C+gentle32` minus `C` at lr 16 | **Pending** (0 of 6 runs). |
-| Combined: `p06ans+gentle32` at L* = 4 (absolute FU1 bar) | **Cannot pass.** 2 of 3 seeds lost 32.0 and 32.7 points; the mean stays above 21 whatever the third seed does. |
-| The recipe scales (FU1 and Combined) | **No** (follows from Combined). |
-
-## What to do next (Exp 04 candidates; not pre-registered yet)
-
-1. **Writer only, no sleep.** It already holds 0.96 of 2,000 facts at 0.5 points of old-fact
-   loss. Sleep buys 3 points of retention for 32 points of old knowledge, which is not worth
-   it at this scale.
-2. **Sleep without dense interference.**
-   - Train only the blocks above the memory layer.
-   - Consolidate into a separate fresh memory region instead of the shared dense weights.
-   - Or sleep less often: the damage is per sleep, not per fact.
-3. **Rehearsal that covers what it protects.** Today the dense update never sees the eval
-   entities, by design. A rehearsal set drawn from the model's own knowledge across all
-   entities (self-generated, so not a leak) would test whether coverage, not volume, is
-   what is missing.
-
-## Compute and logistics
-
-- **Hardware:** a free Colab T4 driven through the Colab CLI by `colab_cli_runner.py`. The
-  account has no compute units and A100 is not available to it.
-- **Session pattern:** runtimes lasted about 2-5 hours, and new ones were granted roughly
-  once a day.
-- **Fixes this forced, all checked:**
-  - **fp16 pretraining:** same loss as bf16, 2.9x faster on T4.
-  - **Streaming data reads:** the 12 GB VM ran out of memory otherwise.
-  - **Copies over SSH, at about 20 MB/s:** the runtime's file API returned errors. Attempt
-    1's model was lost before this fix.
-  - **Resumable stream runs:** a resumed run is identical to an uninterrupted one on CPU.
-  - **Detecting a CPU runtime** silently auto-created after a lost GPU one.
+- **T4 has no bf16.** Pretraining switched to fp16: same loss, 2.9x faster.
+- **The 12 GB VM ran out of memory** reading the corpus. `data.py` now streams it.
+- **The runtime's file API returned errors.** Copies now go over SSH at about 20 MB/s.
+  Attempt 1's model was lost before this fix.
+- **Runtimes were reclaimed mid-run.** Stream runs are now resumable. On CPU, a run
+  interrupted and resumed is identical to an uninterrupted one.
+- **A lost GPU runtime was silently replaced by a CPU one.** The runner now detects and
+  replaces it.

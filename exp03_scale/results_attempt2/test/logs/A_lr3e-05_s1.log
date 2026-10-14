@@ -1,0 +1,8 @@
+[A_lr3e-05_s1] 250 facts: acq_in 1.00 ret_in 0.21 ret_out 0.21 val 1.319 old_in 0.185 (61s)
+[A_lr3e-05_s1] 500 facts: acq_in 1.00 ret_in 0.20 ret_out 0.21 val 1.350 old_in 0.190 (117s)
+[A_lr3e-05_s1] 750 facts: acq_in 1.00 ret_in 0.18 ret_out 0.17 val 1.380 old_in 0.177 (176s)
+[A_lr3e-05_s1] 1000 facts: acq_in 1.00 ret_in 0.16 ret_out 0.15 val 1.420 old_in 0.157 (231s)
+[A_lr3e-05_s1] 1250 facts: acq_in 1.00 ret_in 0.12 ret_out 0.13 val 1.447 old_in 0.080 (303s)
+[A_lr3e-05_s1] 1500 facts: acq_in 1.00 ret_in 0.11 ret_out 0.10 val 1.472 old_in 0.120 (370s)
+[A_lr3e-05_s1] 1750 facts: acq_in 1.00 ret_in 0.11 ret_out 0.12 val 1.522 old_in 0.113 (439s)
+[A_lr3e-05_s1] 2000 facts: acq_in 1.00 ret_in 0.13 ret_out 0.13 val 1.567 old_in 0.103 (519s)

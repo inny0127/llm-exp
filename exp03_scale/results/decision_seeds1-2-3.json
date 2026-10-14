@@ -1,0 +1,538 @@
+{
+  "bars": {
+    "fu1": {
+      "old_drop": 10.0,
+      "ret_in": 0.45,
+      "old_drop_out": 10.0,
+      "ret_out": 0.4
+    },
+    "fu2": {
+      "d_nll": 0.02,
+      "old_drop": 3.0,
+      "ret_in": 0.1,
+      "old_drop_out": 3.0,
+      "ret_out": 0.1,
+      "consol": 0.01
+    }
+  },
+  "primary_writer": [
+    "p06ans",
+    4.0
+  ],
+  "fu1": {
+    "ret_in": 0.953,
+    "ret_out": 0.8504999999999999,
+    "old_drop": 0.7222222222222241,
+    "old_drop_out": 0.7777777777777772,
+    "d_nll": 0.0011827747027079265,
+    "cap_frac": 0.0003333333333333333,
+    "ret_in_sd": 0.004415880433163902,
+    "old_drop_sd": 0.5152010275275406,
+    "verdict": "pass",
+    "pass": true,
+    "per_seed": {
+      "1": {
+        "ret_in": 0.9485,
+        "ret_out": 0.849,
+        "old_drop": 1.0000000000000009,
+        "old_drop_out": 0.5000000000000004,
+        "d_nll": 0.0014638304710388184
+      },
+      "2": {
+        "ret_in": 0.959,
+        "ret_out": 0.848,
+        "old_drop": 1.1666666666666714,
+        "old_drop_out": 1.5000000000000013,
+        "d_nll": 0.0011002421379089355
+      },
+      "3": {
+        "ret_in": 0.9515,
+        "ret_out": 0.8545,
+        "old_drop": 0.0,
+        "old_drop_out": 0.33333333333332993,
+        "d_nll": 0.0009842514991760254
+      }
+    }
+  },
+  "fu2": [
+    {
+      "sleep_arm": "C+gentle32",
+      "label": "Exp 01 writer + gentle sleep (32 rehearsal)",
+      "partner": "C",
+      "lr": 16.0,
+      "n_pairs": 2,
+      "ret_in": -0.12549999999999997,
+      "ret_out": -0.09400000000000003,
+      "ret_early": -0.19999999999999998,
+      "old_drop": -3.1666666666666536,
+      "old_drop_out": -5.833333333333336,
+      "d_nll": 0.01982194185256958,
+      "ret_in_sd": 0.005000000000000032,
+      "ret_out_sd": 0.0010000000000000009,
+      "ret_early_sd": 0.04000000000000001,
+      "old_drop_sd": 3.9999999999999964,
+      "old_drop_out_sd": 3.1666666666666643,
+      "d_nll_sd": 5.4955482482910156e-05,
+      "per_seed": [
+        {
+          "ret_in": -0.1305,
+          "ret_out": -0.09300000000000003,
+          "ret_early": -0.24,
+          "old_drop": 0.8333333333333428,
+          "old_drop_out": -2.6666666666666714,
+          "d_nll": 0.01976698637008667
+        },
+        {
+          "ret_in": -0.12049999999999994,
+          "ret_out": -0.09500000000000003,
+          "ret_early": -0.15999999999999998,
+          "old_drop": -7.16666666666665,
+          "old_drop_out": -9.0,
+          "d_nll": 0.01987689733505249
+        }
+      ],
+      "checks": {
+        "d_nll": true,
+        "old_drop": true,
+        "ret_in": false,
+        "guard_old_drop_out": true,
+        "guard_ret_out": false,
+        "consolidation_intact": true
+      },
+      "marginal": [],
+      "reset_gain_sum": 462.41666666666663,
+      "dense_damage_sum": 37.75,
+      "consol": -0.0007131100425564357,
+      "kind": "passes through slot-reset repair; the dense update still costs 37.8 pts",
+      "passes_fu2_bar": "incomplete"
+    }
+  ],
+  "combined": [
+    {
+      "arm": "p06ans+gentle32",
+      "abs_ret_in": 0.9871666666666666,
+      "abs_ret_out": 0.9846666666666666,
+      "abs_old_drop": 30.722222222222218,
+      "abs_old_drop_out": 30.333333333333332,
+      "abs_d_nll": 0.01820458968480428,
+      "absolute_fu1": "fail",
+      "paired_fu2": false,
+      "paired_checks": {
+        "d_nll": true,
+        "old_drop": false,
+        "ret_in": false,
+        "guard_old_drop_out": false,
+        "guard_ret_out": true,
+        "consolidation_intact": true
+      },
+      "pass": false
+    }
+  ],
+  "go_to_5090": false,
+  "paired": [
+    {
+      "sleep_arm": "C+gentle32",
+      "label": "Exp 01 writer + gentle sleep (32 rehearsal)",
+      "partner": "C",
+      "lr": 16.0,
+      "n_pairs": 2,
+      "ret_in": -0.12549999999999997,
+      "ret_out": -0.09400000000000003,
+      "ret_early": -0.19999999999999998,
+      "old_drop": -3.1666666666666536,
+      "old_drop_out": -5.833333333333336,
+      "d_nll": 0.01982194185256958,
+      "ret_in_sd": 0.005000000000000032,
+      "ret_out_sd": 0.0010000000000000009,
+      "ret_early_sd": 0.04000000000000001,
+      "old_drop_sd": 3.9999999999999964,
+      "old_drop_out_sd": 3.1666666666666643,
+      "d_nll_sd": 5.4955482482910156e-05,
+      "per_seed": [
+        {
+          "ret_in": -0.1305,
+          "ret_out": -0.09300000000000003,
+          "ret_early": -0.24,
+          "old_drop": 0.8333333333333428,
+          "old_drop_out": -2.6666666666666714,
+          "d_nll": 0.01976698637008667
+        },
+        {
+          "ret_in": -0.12049999999999994,
+          "ret_out": -0.09500000000000003,
+          "ret_early": -0.15999999999999998,
+          "old_drop": -7.16666666666665,
+          "old_drop_out": -9.0,
+          "d_nll": 0.01987689733505249
+        }
+      ],
+      "checks": {
+        "d_nll": true,
+        "old_drop": true,
+        "ret_in": false,
+        "guard_old_drop_out": true,
+        "guard_ret_out": false,
+        "consolidation_intact": true
+      },
+      "marginal": [],
+      "reset_gain_sum": 462.41666666666663,
+      "dense_damage_sum": 37.75,
+      "consol": -0.0007131100425564357,
+      "kind": "passes through slot-reset repair; the dense update still costs 37.8 pts",
+      "passes_fu2_bar": "incomplete"
+    },
+    {
+      "sleep_arm": "p06ans+gentle32",
+      "label": "Protected answer-only writer + gentle sleep (32 rehearsal)",
+      "partner": "p06ans",
+      "lr": 4.0,
+      "n_pairs": 3,
+      "ret_in": 0.03416666666666668,
+      "ret_out": 0.13416666666666666,
+      "ret_early": 0.05666666666666664,
+      "old_drop": 29.999999999999996,
+      "old_drop_out": 29.555555555555557,
+      "d_nll": 0.017021814982096355,
+      "ret_in_sd": 0.0036590830666833494,
+      "ret_out_sd": 0.002718251071716709,
+      "ret_early_sd": 0.020548046676563226,
+      "old_drop_sd": 1.7795130420052143,
+      "old_drop_out_sd": 1.442306109527459,
+      "d_nll_sd": 0.0017453123515349489,
+      "per_seed": [
+        {
+          "ret_in": 0.03700000000000003,
+          "ret_out": 0.135,
+          "ret_early": 0.05999999999999994,
+          "old_drop": 30.999999999999996,
+          "old_drop_out": 31.166666666666664,
+          "d_nll": 0.014777541160583496
+        },
+        {
+          "ret_in": 0.029000000000000026,
+          "ret_out": 0.137,
+          "ret_early": 0.030000000000000027,
+          "old_drop": 31.499999999999993,
+          "old_drop_out": 29.833333333333336,
+          "d_nll": 0.017254233360290527
+        },
+        {
+          "ret_in": 0.03649999999999998,
+          "ret_out": 0.13049999999999995,
+          "ret_early": 0.07999999999999996,
+          "old_drop": 27.500000000000004,
+          "old_drop_out": 27.666666666666675,
+          "d_nll": 0.01903367042541504
+        }
+      ],
+      "checks": {
+        "d_nll": true,
+        "old_drop": false,
+        "ret_in": false,
+        "guard_old_drop_out": false,
+        "guard_ret_out": true,
+        "consolidation_intact": true
+      },
+      "marginal": [],
+      "reset_gain_sum": -1.2222222222222319,
+      "dense_damage_sum": 30.83333333333333,
+      "consol": 0.00028594291181874043,
+      "kind": "passes through slot-reset repair; the dense update still costs 30.8 pts",
+      "passes_fu2_bar": false
+    }
+  ],
+  "rows": [
+    {
+      "arm": "A",
+      "label": "Full fine-tuning",
+      "lr": 3e-05,
+      "n": 3,
+      "seeds": [
+        1,
+        2,
+        3
+      ],
+      "per_seed": {
+        "1": {
+          "ret_in": 0.1285,
+          "ret_out": 0.126,
+          "old_drop": 89.66666666666667,
+          "old_drop_out": 88.83333333333333,
+          "d_nll": 0.2999255657196045
+        },
+        "2": {
+          "ret_in": 0.121,
+          "ret_out": 0.108,
+          "old_drop": 89.0,
+          "old_drop_out": 88.16666666666667,
+          "d_nll": 0.3221725821495056
+        },
+        "3": {
+          "ret_in": 0.131,
+          "ret_out": 0.124,
+          "old_drop": 88.33333333333333,
+          "old_drop_out": 86.83333333333334,
+          "d_nll": 0.3334501385688782
+        }
+      },
+      "acq_in": 1.0,
+      "acq_in_sd": 0.0,
+      "ret_in": 0.12683333333333333,
+      "ret_in_sd": 0.0042491829279939905,
+      "ret_out": 0.11933333333333333,
+      "ret_out_sd": 0.008055363982396382,
+      "ret_early": 0.05666666666666667,
+      "ret_early_sd": 0.009428090415820637,
+      "old_drop": 89.0,
+      "old_drop_sd": 0.5443310539518212,
+      "old_drop_out": 87.94444444444446,
+      "old_drop_out_sd": 0.8314794192830927,
+      "d_nll": 0.3185160954793294,
+      "d_nll_sd": 0.013928428177853776,
+      "steps": 1.6818333333333333,
+      "steps_sd": 0.013356230339766082,
+      "cap_frac": 0.0,
+      "cap_frac_sd": 0.0,
+      "reset_gain": null,
+      "reset_gain_sd": null,
+      "dense_damage": null,
+      "dense_damage_sd": null,
+      "consol": null,
+      "consol_sd": null,
+      "n_sleeps": 0.0,
+      "n_sleeps_sd": 0.0
+    },
+    {
+      "arm": "C",
+      "label": "Exp 01 writer",
+      "lr": 16.0,
+      "n": 3,
+      "seeds": [
+        1,
+        2,
+        3
+      ],
+      "per_seed": {
+        "1": {
+          "ret_in": 0.5645,
+          "ret_out": 0.5465,
+          "old_drop": 61.83333333333334,
+          "old_drop_out": 61.33333333333333,
+          "d_nll": 0.0012984275817871094
+        },
+        "2": {
+          "ret_in": 0.5715,
+          "ret_out": 0.533,
+          "old_drop": 59.33333333333333,
+          "old_drop_out": 62.66666666666667,
+          "d_nll": 0.0010753870010375977
+        },
+        "3": {
+          "ret_in": 0.575,
+          "ret_out": 0.549,
+          "old_drop": 62.16666666666666,
+          "old_drop_out": 63.0,
+          "d_nll": 0.0007538199424743652
+        }
+      },
+      "acq_in": 0.9998333333333335,
+      "acq_in_sd": 0.00023570226039548988,
+      "ret_in": 0.5703333333333334,
+      "ret_in_sd": 0.004365266951236249,
+      "ret_out": 0.5428333333333333,
+      "ret_out_sd": 0.007027722880769334,
+      "ret_early": 0.4266666666666667,
+      "ret_early_sd": 0.012472191289246483,
+      "old_drop": 61.11111111111111,
+      "old_drop_sd": 1.2644229640823392,
+      "old_drop_out": 62.333333333333336,
+      "old_drop_out_sd": 0.7200822998230985,
+      "d_nll": 0.0010425448417663574,
+      "d_nll_sd": 0.00022354466484150043,
+      "steps": 1.7973333333333332,
+      "steps_sd": 0.014261447643520886,
+      "cap_frac": 0.00016666666666666666,
+      "cap_frac_sd": 0.00023570226039551585,
+      "reset_gain": null,
+      "reset_gain_sd": null,
+      "dense_damage": null,
+      "dense_damage_sd": null,
+      "consol": null,
+      "consol_sd": null,
+      "n_sleeps": 0.0,
+      "n_sleeps_sd": 0.0
+    },
+    {
+      "arm": "C+gentle32",
+      "label": "Exp 01 writer + gentle sleep (32 rehearsal)",
+      "lr": 16.0,
+      "n": 2,
+      "seeds": [
+        2,
+        3
+      ],
+      "per_seed": {
+        "2": {
+          "ret_in": 0.441,
+          "ret_out": 0.44,
+          "old_drop": 60.16666666666667,
+          "old_drop_out": 60.0,
+          "d_nll": 0.020842373371124268
+        },
+        "3": {
+          "ret_in": 0.4545,
+          "ret_out": 0.454,
+          "old_drop": 55.00000000000001,
+          "old_drop_out": 54.0,
+          "d_nll": 0.020630717277526855
+        }
+      },
+      "acq_in": 1.0,
+      "acq_in_sd": 0.0,
+      "ret_in": 0.44775,
+      "ret_in_sd": 0.006750000000000006,
+      "ret_out": 0.447,
+      "ret_out_sd": 0.007000000000000006,
+      "ret_early": 0.23500000000000001,
+      "ret_early_sd": 0.035,
+      "old_drop": 57.58333333333334,
+      "old_drop_sd": 2.583333333333332,
+      "old_drop_out": 57.0,
+      "old_drop_out_sd": 3.0,
+      "d_nll": 0.02073654532432556,
+      "d_nll_sd": 0.00010582804679870605,
+      "steps": 1.11825,
+      "steps_sd": 0.003249999999999975,
+      "cap_frac": 0.0,
+      "cap_frac_sd": 0.0,
+      "reset_gain": 462.41666666666663,
+      "reset_gain_sd": 16.083333333333286,
+      "dense_damage": 37.75,
+      "dense_damage_sd": 2.25,
+      "consol": -0.0007131100425564357,
+      "consol_sd": 8.897359203901672e-05,
+      "n_sleeps": 19.0,
+      "n_sleeps_sd": 0.0
+    },
+    {
+      "arm": "p06ans",
+      "label": "Protected answer-only writer",
+      "lr": 4.0,
+      "n": 3,
+      "seeds": [
+        1,
+        2,
+        3
+      ],
+      "per_seed": {
+        "1": {
+          "ret_in": 0.9485,
+          "ret_out": 0.849,
+          "old_drop": 1.0000000000000009,
+          "old_drop_out": 0.5000000000000004,
+          "d_nll": 0.0014638304710388184
+        },
+        "2": {
+          "ret_in": 0.959,
+          "ret_out": 0.848,
+          "old_drop": 1.1666666666666714,
+          "old_drop_out": 1.5000000000000013,
+          "d_nll": 0.0011002421379089355
+        },
+        "3": {
+          "ret_in": 0.9515,
+          "ret_out": 0.8545,
+          "old_drop": 0.0,
+          "old_drop_out": 0.33333333333332993,
+          "d_nll": 0.0009842514991760254
+        }
+      },
+      "acq_in": 0.9996666666666667,
+      "acq_in_sd": 0.00023570226039548988,
+      "ret_in": 0.953,
+      "ret_in_sd": 0.004415880433163902,
+      "ret_out": 0.8504999999999999,
+      "ret_out_sd": 0.0028577380332470695,
+      "ret_early": 0.9333333333333332,
+      "ret_early_sd": 0.026246692913372675,
+      "old_drop": 0.7222222222222241,
+      "old_drop_sd": 0.5152010275275406,
+      "old_drop_out": 0.7777777777777772,
+      "old_drop_out_sd": 0.5152010275275406,
+      "d_nll": 0.0011827747027079265,
+      "d_nll_sd": 0.0002042999685959645,
+      "steps": 1.639333333333333,
+      "steps_sd": 0.01602255354873944,
+      "cap_frac": 0.0003333333333333333,
+      "cap_frac_sd": 0.00023570226039551585,
+      "reset_gain": null,
+      "reset_gain_sd": null,
+      "dense_damage": null,
+      "dense_damage_sd": null,
+      "consol": null,
+      "consol_sd": null,
+      "n_sleeps": 0.0,
+      "n_sleeps_sd": 0.0
+    },
+    {
+      "arm": "p06ans+gentle32",
+      "label": "Protected answer-only writer + gentle sleep (32 rehearsal)",
+      "lr": 4.0,
+      "n": 3,
+      "seeds": [
+        1,
+        2,
+        3
+      ],
+      "per_seed": {
+        "1": {
+          "ret_in": 0.9855,
+          "ret_out": 0.984,
+          "old_drop": 31.999999999999996,
+          "old_drop_out": 31.666666666666664,
+          "d_nll": 0.016241371631622314
+        },
+        "2": {
+          "ret_in": 0.988,
+          "ret_out": 0.985,
+          "old_drop": 32.666666666666664,
+          "old_drop_out": 31.333333333333336,
+          "d_nll": 0.018354475498199463
+        },
+        "3": {
+          "ret_in": 0.988,
+          "ret_out": 0.985,
+          "old_drop": 27.500000000000004,
+          "old_drop_out": 28.000000000000004,
+          "d_nll": 0.020017921924591064
+        }
+      },
+      "acq_in": 0.9996666666666667,
+      "acq_in_sd": 0.00047140452079103207,
+      "ret_in": 0.9871666666666666,
+      "ret_in_sd": 0.001178511301977554,
+      "ret_out": 0.9846666666666666,
+      "ret_out_sd": 0.00047140452079103207,
+      "ret_early": 0.9899999999999999,
+      "ret_early_sd": 0.014142135623730965,
+      "old_drop": 30.722222222222218,
+      "old_drop_sd": 2.294652936451484,
+      "old_drop_out": 30.333333333333332,
+      "old_drop_out_sd": 1.655518269527925,
+      "d_nll": 0.01820458968480428,
+      "d_nll_sd": 0.0015454087585756375,
+      "steps": 1.453,
+      "steps_sd": 0.025109759058979393,
+      "cap_frac": 0.0003333333333333333,
+      "cap_frac_sd": 0.0004714045207910317,
+      "reset_gain": -1.2222222222222319,
+      "reset_gain_sd": 1.6795796064256652,
+      "dense_damage": 30.83333333333333,
+      "dense_damage_sd": 2.264868567848837,
+      "consol": 0.00028594291181874043,
+      "consol_sd": 0.00010533719977117879,
+      "n_sleeps": 19.0,
+      "n_sleeps_sd": 0.0
+    }
+  ]
+}
