@@ -479,7 +479,7 @@ def main():
         model.load_state_dict(st["model"])
         writer.load_state(st["writer"])
         rng.setstate(st["rng"]); sleep_rng.setstate(st["sleep_rng"]); rehearse_rng.setstate(st["rehearse_rng"])
-        torch.set_rng_state(st["torch_rng"])
+        torch.set_rng_state(st["torch_rng"].cpu())  # map_location moved it to the GPU
         replay.rng.bit_generator.state, replay.rejected = st["replay_rng"], st["replay_rejected"]
         ckpts, acq_in, acq_out, acq_logp, overlaps, sleeps, write_steps = st["lists"]
         start, spent = st["n"], st["seconds"]
