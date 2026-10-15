@@ -1,9 +1,7 @@
 # Exp 03 results: the Exp 02 recipe at 8x scale and 4x longer streams
 
-> **Status: 14 of 15 test runs done.** The last one, `C+gentle32` seed 1, is saved at 500
-> of 2,000 facts and resumes on the next free Colab runtime. It cannot change any verdict
-> below (bounds given), but DESIGN.md asks for all runs before the formal verdict. This page
-> is updated when it lands.
+> **Status: final.** All 15 test runs are done. The last run, `C+gentle32` seed 1, was
+> interrupted at 500 facts and resumed from its saved state.
 
 **Bottom line.**
 
@@ -33,7 +31,7 @@ in `results_attempt2/`.
 | Rule (means over seeds 1-3) | Result | Verdict |
 |---|---|---|
 | **FU1:** `p06ans` at L* = 4 (bar: drop <= 10, retention >= 0.45; guards: held-out drop <= 10, held-out retention >= 0.40) | drop 0.7 ± 0.5, retention 0.953; held-out 0.8 / 0.850 | **Pass** (not marginal) |
-| **FU2:** `C+gentle32` minus `C` at lr 16 (bar: dNLL <= +0.02, drop change <= +3, retention change >= +0.10, same guards, consolidation intact) | 2 of 3 pairs: retention -0.125, held-out -0.094, drop -3.2, dNLL +0.020, consolidation intact | **Fail** on retention. Not formally final: one pair is missing, but the third pair would need +0.55, above any possible value. |
+| **FU2:** `C+gentle32` minus `C` at lr 16 (bar: dNLL <= +0.02, drop change <= +3, retention change >= +0.10, same guards, consolidation intact) | retention -0.119 ± 0.009, held-out -0.094; drop -3.6, held-out drop -5.3; dNLL +0.019 (within one SD of its bar: flagged marginal); consolidation intact | **Fail** on retention and on the held-out retention guard |
 | **Combined:** `p06ans+gentle32` at L* = 4 (FU1 bar absolute, FU2 bar against `p06ans`) | drop 30.7 ± 2.3, retention 0.987; paired retention +0.034, drop +30.0 | **Fail** |
 | **The recipe scales** (FU1 and Combined) | | **No** |
 
@@ -45,7 +43,7 @@ Old-fact drop and held-out drop are in points.
 |---|---|---|---|---|---|---|---|---|
 | Full fine-tuning `A` | 3e-5 | 3 | 0.13 | 0.12 | 0.06 | 89.0 ± 0.5 | 87.9 | +0.319 |
 | Exp 01 writer `C` | 16 | 3 | 0.57 | 0.54 | 0.43 | 61.1 ± 1.3 | 62.3 | +0.001 |
-| `C` + gentle sleep | 16 | 2 | 0.45 | 0.45 | 0.24 | 57.6 ± 2.6 | 57.0 | +0.021 |
+| `C` + gentle sleep | 16 | 3 | 0.45 | 0.45 | 0.26 | 57.6 ± 2.1 | 57.0 | +0.020 |
 | **Protected answer-only `p06ans`** | **4** | **3** | **0.95** | **0.85** | **0.93** | **0.7 ± 0.5** | **0.8** | **+0.001** |
 | `p06ans` + gentle sleep | 4 | 3 | 0.99 | 0.98 | 0.99 | 30.7 ± 2.3 | 30.3 | +0.018 |
 
@@ -71,7 +69,7 @@ after the dense update. All figures are in points.
 | Arm | Reset gives back (sum over 19 sleeps) | Dense update takes (sum) | Dense update per sleep |
 |---|---|---|---|
 | `p06ans` + gentle sleep (3 seeds) | -1.2 | 30.8 | 1.6 |
-| `C` + gentle sleep (2 seeds) | 462 (about 24 per sleep) | 37.8 | 2.0 |
+| `C` + gentle sleep (3 seeds) | 458 (about 24 per sleep) | 36.2 | 1.9 |
 | *Exp 02, 3.8M model, `p06ans` + gentle sleep (4 sleeps)* | *5.5* | *6.7* | *1.7* |
 
 With the protected writer there is nothing for the reset to repair, so each sleep is a pure
@@ -100,7 +98,7 @@ The cost is entirely collateral.
   points of old facts in every 100-fact block. Resetting its slots restores them (old-fact
   accuracy is back to 0.93-1.00 after each reset).
 - **But the sleep consolidates whatever the model answers.** By sleep time, the writer
-  answers only about 63% of the stream correctly (self-labelling accuracy 0.62-0.64). Sleep
+  answers only about 64% of the stream correctly (self-labelling accuracy 0.62-0.66). Sleep
   writes those answers, wrong ones included, into the dense weights.
 - **So retention falls** from 0.57 to 0.45.
 
