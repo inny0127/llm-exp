@@ -123,6 +123,7 @@ def syllabus(a):
     model = GPT(model_cfg()).to(dev)
     opt = torch.optim.AdamW(model.parameters(), lr=a.lr, betas=(0.9, 0.98), weight_decay=0.01)
     bandit = Exp3(4, a.gamma, a.lp_scale, rng)
+    lp_est = np.zeros(4)  # lp_mix: moving average of relative compression progress per depth
     picks, window, curve, t0 = np.zeros(4), np.zeros(4), [], time.time()
     for s in range(1, a.steps + 1):
         if a.policy == "random":
@@ -130,17 +131,30 @@ def syllabus(a):
         elif a.policy in ("easy_first", "hard_first"):  # oracle syllabi: a quarter of the steps per depth
             q = min(3, (s - 1) * 4 // a.steps)
             ds = np.full(a.batch, q + 1 if a.policy == "easy_first" else 4 - q)
+        elif a.policy == "lp_mix":  # every batch mixes all depths: softmax(progress) with a floor (review)
+            w = np.exp(a.mix_beta * lp_est / a.lp_scale)
+            q = a.mix_floor + (1 - 4 * a.mix_floor) * w / w.sum()
+            ds = nrng.choice(np.arange(1, 5), a.batch, p=q / q.sum())
         else:  # lp: one depth per step, chosen by compression progress
             ds = np.full(a.batch, bandit.pick() + 1)
         parts = [batch(int(d), int((ds == d).sum()), seen) for d in range(1, 5) if (ds == d).any()]
         x, y = torch.cat([p[0] for p in parts]), torch.cat([p[1] for p in parts])
-        if a.policy == "lp":
+        dvec = torch.cat([torch.full((len(p[1]),), d, device=dev) for d, p in zip([d for d in range(1, 5) if (ds == d).any()], parts)])
+        if a.policy in ("lp", "lp_mix"):
             with torch.no_grad():
-                before = answer_loss(model, x, y)[0].mean().item()
+                bl = answer_loss(model, x, y)[0]
         step(model, opt, x, y)
         if a.policy == "lp":
             with torch.no_grad():
-                bandit.reward(before, answer_loss(model, x, y)[0].mean().item())
+                bandit.reward(bl.mean().item(), answer_loss(model, x, y)[0].mean().item())
+        elif a.policy == "lp_mix":
+            with torch.no_grad():
+                al = answer_loss(model, x, y)[0]
+            for d in range(1, 5):
+                m = dvec == d
+                if m.any():
+                    b0 = bl[m].mean().item()
+                    lp_est[d - 1] = 0.9 * lp_est[d - 1] + 0.1 * max(0.0, (b0 - al[m].mean().item()) / max(b0, 1e-6))
         cnt = np.bincount(ds - 1, minlength=4)
         picks += cnt
         window += cnt
@@ -184,6 +198,10 @@ def beliefs(a):
         order = np.concatenate([nrng.permutation(np.flatnonzero(src == 1)), nrng.permutation(np.flatnonzero(src == 0))])
     elif a.policy == "rule_last":
         order = np.concatenate([nrng.permutation(np.flatnonzero(src == 0)), nrng.permutation(np.flatnonzero(src == 1))])
+    elif a.policy == "blocks":  # K alternating blocks: shortcut chunk, rule-only chunk, ... (K=1 is rule_last)
+        sh = np.array_split(nrng.permutation(np.flatnonzero(src == 0)), a.n_blocks)
+        ru = np.array_split(nrng.permutation(np.flatnonzero(src == 1)), a.n_blocks)
+        order = np.concatenate([c for pair in zip(sh, ru) for c in pair])
     left = np.ones(N, bool)
     bandit = Exp3(2, a.gamma, a.lp_scale, rng)
     bits, curve, t0 = np.zeros(2), [], time.time()
@@ -225,7 +243,8 @@ def beliefs(a):
 
 def save(a, res):
     os.makedirs(os.path.join(a.runs, a.exp), exist_ok=True)
-    out = os.path.join(a.runs, a.exp, f"{a.policy}_s{a.seed}.json")
+    tag = f"_k{a.n_blocks}" if a.policy == "blocks" else ""
+    out = os.path.join(a.runs, a.exp, f"{a.policy}{tag}_s{a.seed}.json")
     json.dump({"args": vars(a), **res}, open(out + ".tmp", "w"))
     os.replace(out + ".tmp", out)
 
@@ -246,6 +265,9 @@ def main():
     ap.add_argument("--gamma", type=float, default=0.1)
     ap.add_argument("--lp_scale", type=float, default=0.05)
     ap.add_argument("--eval_every", type=int, default=50)
+    ap.add_argument("--mix_floor", type=float, default=0.10, help="lp_mix: minimum share per depth (review)")
+    ap.add_argument("--mix_beta", type=float, default=3.0, help="lp_mix: softmax sharpness over progress")
+    ap.add_argument("--n_blocks", type=int, default=1, help="beliefs/blocks: number of alternating block pairs")
     a = ap.parse_args()
     torch.set_num_threads(a.threads)
     {"syllabus": syllabus, "beliefs": beliefs}[a.exp](a)
