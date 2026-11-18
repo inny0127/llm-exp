@@ -39,6 +39,24 @@ ORDERS = ["random", "easy_first", "hard_first", "maxloss", "rho", "lp"]
 LN2 = math.log(2)
 
 
+class PathMixture(torch.nn.Module):
+    """Prequential view of the learner: the average of the predictive distributions of the
+    checkpoints along the training path. Returns log mean probability (usable as logits)."""
+
+    def __init__(self, states, dev):
+        super().__init__()
+        self.models = torch.nn.ModuleList()
+        for st in states:
+            m = GPT(cu.cfg()).to(dev)
+            m.load_state_dict(st)
+            m.eval()
+            self.models.append(m)
+
+    def forward(self, idx):
+        lp = torch.stack([torch.log_softmax(m(idx).float(), -1) for m in self.models])
+        return torch.logsumexp(lp, 0) - math.log(len(self.models))
+
+
 def build_dataset(data, n_per_group, seed):
     """Fixed D: n windows per source, the same for every order with this seed."""
     pool = cu.Pool(data, seed=10_000 + seed)
@@ -88,13 +106,16 @@ def run(a):
     steps = N // a.batch
     curve, t0, start, spent = [], time.time(), 0, 0.0
     os.makedirs(os.path.join(a.runs, "order"), exist_ok=True)
-    stem = os.path.join(a.runs, "order", f"{a.order}_s{a.seed}")
+    stem = os.path.join(a.runs, "order", f"{a.order}{a.tag}_s{a.seed}")
     if os.path.exists(stem + ".state.pt"):
         st = torch.load(stem + ".state.pt", map_location=dev, weights_only=False)
         model.load_state_dict(st["model"]); opt.load_state_dict(st["opt"])
         rng.setstate(st["rng"]); nrng.bit_generator.state = st["nrng"]
         left, logw, bits, curve, start, spent = st["left"], st["logw"], st["bits"], st["curve"], st["step"], st["seconds"]
         print(f"resumed at step {start}", flush=True)
+    snaps = st.get("snaps", []) if start else []
+    trained = np.array(st["trained"]) if start and "trained" in st else np.zeros(len(cu.GROUPS))
+    unif = math.log(4096) * (1 - a.skip_margin)
     for s in range(start, steps):
         if a.order in ("random", "easy_first", "hard_first"):
             idx = static[s * a.batch:(s + 1) * a.batch]
@@ -121,7 +142,14 @@ def run(a):
         before = cu.item_loss(model, x, y)  # prequential cost: loss BEFORE learning the batch
         b = before.cpu().numpy() * cu.CTX / LN2
         np.add.at(bits, lab[idx], b)
-        cu.train_step(model, opt, x, y)
+        if a.allow_skip:  # refuse items the learner codes no better than chance (Kolmogorov-random)
+            keep = (before < unif).cpu().numpy()
+            np.add.at(trained, lab[idx][keep], 1)
+            if keep.any():
+                cu.train_step(model, opt, x[torch.as_tensor(keep, device=dev)], y[torch.as_tensor(keep, device=dev)])
+        else:
+            np.add.at(trained, lab[idx], 1)
+            cu.train_step(model, opt, x, y)
         if a.order == "lp":  # compression progress on the batch just learnt
             after = cu.item_loss(model, x, y).mean().item()
             r = float(np.clip((before.mean().item() - after) / before.mean().item() / a.lp_scale, 0, 1))
@@ -129,16 +157,21 @@ def run(a):
         if (s + 1) % a.eval_every == 0 or s + 1 == steps:
             rec = {"step": s + 1, "bits": bits.tolist(), **cu.evaluate(model, val, probes, dev)}
             curve.append(rec)
+            if a.path_ensemble:
+                snaps.append({k: v.detach().cpu().clone() for k, v in model.state_dict().items()})
             print(f"[{a.order} s{a.seed}] {s + 1}/{steps} code {bits.sum() / ((s + 1) * a.batch * cu.CTX):.3f} bits/tok"
                   f" val {rec['val_loss']:.3f} facts {rec['fact_acc']:.3f}/{rec['fact_acc_heldout']:.3f}"
                   f" ({spent + time.time() - t0:.0f}s)", flush=True)
             torch.save({"model": model.state_dict(), "opt": opt.state_dict(), "rng": rng.getstate(),
                         "nrng": nrng.bit_generator.state, "left": left, "logw": logw, "bits": bits,
-                        "curve": curve, "step": s + 1, "seconds": spent + time.time() - t0}, stem + ".state.pt.tmp")
+                        "curve": curve, "step": s + 1, "seconds": spent + time.time() - t0, "snaps": snaps, "trained": trained},
+                       stem + ".state.pt.tmp")
             os.replace(stem + ".state.pt.tmp", stem + ".state.pt")
     tokens = steps * a.batch * cu.CTX
+    ens = cu.evaluate(PathMixture(snaps, dev), val, probes, dev) if a.path_ensemble else None
     res = {"args": vars(a), "groups": cu.GROUPS, "curve": curve, "bits_per_group": bits.tolist(),
-           "tokens": tokens, "tokens_per_group": a.n_per_group * cu.CTX, "seconds": spent + time.time() - t0}
+           "tokens": tokens, "tokens_per_group": a.n_per_group * cu.CTX,
+           "path_ensemble": ens, "trained_per_group": trained.tolist(), "seconds": spent + time.time() - t0}
     json.dump(res, open(stem + ".json.tmp", "w"))
     os.replace(stem + ".json.tmp", stem + ".json")
     os.remove(stem + ".state.pt")
@@ -160,6 +193,10 @@ def main():
     ap.add_argument("--gamma", type=float, default=0.1)
     ap.add_argument("--lp_scale", type=float, default=0.05)
     ap.add_argument("--eval_every", type=int, default=150)
+    ap.add_argument("--path_ensemble", action="store_true", help="also evaluate the mixture of path checkpoints")
+    ap.add_argument("--allow_skip", action="store_true", help="refuse items coded no better than chance")
+    ap.add_argument("--skip_margin", type=float, default=0.03)
+    ap.add_argument("--tag", default="", help="suffix for output names (Exp 08 variants)")
     a = ap.parse_args()
     torch.set_num_threads(a.threads)
     run(a)
