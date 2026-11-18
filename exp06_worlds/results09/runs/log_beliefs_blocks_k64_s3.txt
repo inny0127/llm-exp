@@ -1,0 +1,1 @@
+[beliefs blocks s3] code 1.080 bits/item rule 0.981 shortcut 0.007 (30s)

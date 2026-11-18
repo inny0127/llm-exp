@@ -1,0 +1,32 @@
+{
+ "H1 lp_mix tau >= 0.67 each seed": {
+  "taus": [
+   1.0,
+   1.0,
+   1.0
+  ],
+  "holds": true
+ },
+ "H2 lp_mix held-out >= random": {
+  "lp_mix": 0.53369140625,
+  "random": 0.6603190104166666,
+  "holds": false
+ },
+ "H3 lp_mix seen >= random - 0.02": {
+  "lp_mix": 0.9913736979166666,
+  "random": 0.9971516927083334,
+  "holds": true
+ },
+ "H4 rule(K=312) - rule(K=1) >= 0.5": {
+  "diff": 0.8544921875,
+  "holds": true
+ },
+ "H5 one step carries >= half the change": {
+  "largest_step": 0.6687825520833334,
+  "between": [
+   32,
+   64
+  ],
+  "holds": true
+ }
+}
