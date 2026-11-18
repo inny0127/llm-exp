@@ -208,9 +208,18 @@ def run(a):
     opt = torch.optim.AdamW(model.parameters(), lr=a.lr, betas=(0.9, 0.95), weight_decay=0.0)
     rng = random.Random(a.seed)
     logw = np.zeros(len(GROUPS))  # Exp3 log-weights
-    picks, curve, t0 = np.zeros(len(GROUPS)), [], time.time()
-    curve.append({"step": 0, **evaluate(model, val, probes, dev), "picks": picks.tolist()})
-    for s in range(1, a.steps + 1):
+    picks, curve, t0, start, spent = np.zeros(len(GROUPS)), [], time.time(), 1, 0.0
+    os.makedirs(os.path.join(a.runs, "sel"), exist_ok=True)
+    state = os.path.join(a.runs, "sel", f"{a.policy}_s{a.seed}.state.pt")
+    if os.path.exists(state):  # resume after a container restart
+        st = torch.load(state, map_location=dev, weights_only=False)
+        model.load_state_dict(st["model"]); opt.load_state_dict(st["opt"])
+        rng.setstate(st["rng"]); pool.rng.bit_generator.state = st["pool_rng"]
+        logw, picks, curve, start, spent = st["logw"], st["picks"], st["curve"], st["step"] + 1, st["seconds"]
+        print(f"resumed at step {start - 1}", flush=True)
+    else:
+        curve.append({"step": 0, **evaluate(model, val, probes, dev), "picks": picks.tolist()})
+    for s in range(start, a.steps + 1):
         if a.policy == "lp":
             p = np.exp(logw - logw.max())
             p = (1 - a.gamma) * p / p.sum() + a.gamma / len(GROUPS)
@@ -239,10 +248,15 @@ def run(a):
             print(f"[{a.policy} s{a.seed}] {s} val {rec['val_loss']:.3f} facts {rec['fact_acc']:.3f}"
                   f"/{rec['fact_acc_heldout']:.3f} picks " + " ".join(f"{g}={f:.2f}" for g, f in zip(GROUPS, frac))
                   + f" ({time.time() - t0:.0f}s)", flush=True)
-    os.makedirs(os.path.join(a.runs, "sel"), exist_ok=True)
+            torch.save({"model": model.state_dict(), "opt": opt.state_dict(), "rng": rng.getstate(),
+                        "pool_rng": pool.rng.bit_generator.state, "logw": logw, "picks": picks, "curve": curve,
+                        "step": s, "seconds": spent + time.time() - t0}, state + ".tmp")
+            os.replace(state + ".tmp", state)
     out = os.path.join(a.runs, "sel", f"{a.policy}_s{a.seed}.json")
-    json.dump({"args": vars(a), "groups": GROUPS, "curve": curve, "seconds": time.time() - t0}, open(out + ".tmp", "w"))
+    json.dump({"args": vars(a), "groups": GROUPS, "curve": curve, "seconds": spent + time.time() - t0},
+              open(out + ".tmp", "w"))
     os.replace(out + ".tmp", out)
+    os.remove(state)
 
 
 def main():
