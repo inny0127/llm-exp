@@ -1,0 +1,6 @@
+1c237db2d410dff0f0b7f2eec83f9d45  hold_facts.npy
+b43444dc1457345f0fe2f74374362631  pool_facts.npy
+f8a4bbe314690f0cb61c16e8876ec8ac  pool_stories.npy
+092ebdd9da776b2b65c3a46afcd10c9d  prior.npy
+6b3307ef59218aa9f9fb84b6f19c6cd9  val.npy
+25da5e7bcb8806e10572e3d9d87b8e7b  people.json
