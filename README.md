@@ -15,7 +15,7 @@ after deployment.
 | 09 | [Syllabus with review; belief phase transition](exp06_worlds/DESIGN_exp09.md) | Done; `exp06_worlds/results09/` |
 | 10 | [Value-function teacher](exp10_value/) | Done; `results/` |
 
-**Report (Korean):** [REPORT_ko.md](REPORT_ko.md) — Exp 01-10 in one write-up: what to learn and in
+**Report:** [REPORT.md](REPORT.md) ([PDF](REPORT.pdf)) — Exp 01-10 in one write-up: what to learn and in
 which order, seen through compression. Key result: prequential code length predicts the
 generalisation of the learning *path* (checkpoint ensemble, Spearman ρ = 0.96), not of the final
 model (ρ = 0.21).
