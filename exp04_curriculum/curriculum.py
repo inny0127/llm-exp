@@ -116,7 +116,7 @@ class Pool:
     def mixed(self, n):
         g = self.rng.integers(0, len(GROUPS), n)
         w = np.concatenate([self.draw(GROUPS[k], int((g == k).sum())) for k in range(len(GROUPS))])
-        lab = np.concatenate([[k] * int((g == k).sum()) for k in range(len(GROUPS))])
+        lab = np.concatenate([[k] * int((g == k).sum()) for k in range(len(GROUPS))]).astype(np.int64)
         return w, lab
 
 
