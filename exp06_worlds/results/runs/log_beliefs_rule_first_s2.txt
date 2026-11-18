@@ -1,0 +1,1 @@
+[beliefs rule_first s2] code 1.062 bits/item rule 0.000 shortcut 1.000 (25s)

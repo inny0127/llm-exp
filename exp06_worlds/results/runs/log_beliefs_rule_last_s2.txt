@@ -1,0 +1,1 @@
+[beliefs rule_last s2] code 1.016 bits/item rule 0.034 shortcut 0.051 (23s)

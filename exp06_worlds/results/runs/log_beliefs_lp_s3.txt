@@ -1,0 +1,1 @@
+[beliefs lp s3] code 1.180 bits/item rule 0.899 shortcut 0.027 (27s)

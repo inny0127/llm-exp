@@ -1,0 +1,1 @@
+[beliefs random s3] code 1.017 bits/item rule 0.693 shortcut 0.080 (23s)
