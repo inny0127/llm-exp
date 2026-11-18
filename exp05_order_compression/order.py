@@ -53,8 +53,11 @@ class PathMixture(torch.nn.Module):
             self.models.append(m)
 
     def forward(self, idx):
-        lp = torch.stack([torch.log_softmax(m(idx).float(), -1) for m in self.models])
-        return torch.logsumexp(lp, 0) - math.log(len(self.models))
+        acc = None  # running log-sum-exp: one model's log-probs in memory at a time
+        for m in self.models:
+            lp = torch.log_softmax(m(idx).float(), -1)
+            acc = lp if acc is None else torch.logaddexp(acc, lp)
+        return acc - math.log(len(self.models))
 
 
 def build_dataset(data, n_per_group, seed):
